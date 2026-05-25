@@ -14,6 +14,10 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "PT"]
+# rules.py and router.py contain user-facing response copy with intentional
+# typography (curly quotes, em-dashes, multiplication sign). Don't flag those.
+"src/guardrails/rules.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"src/guardrails/router.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 
 [tool.mypy]
 python_version = "3.12"

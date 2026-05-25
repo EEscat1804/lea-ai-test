@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from guardrails.classifier import classify_message
+from guardrails.classifier import classify_message, process_message_endpoint
 from lib.auth import authorize
 from lib.responses import json_response, problem_response
 from persona.system_prompts import get_persona_prompt
@@ -35,6 +35,10 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
     if path == "/v1/guardrails/classify" and method == "POST":
         body = await _read_json_body(request)
         return await classify_message(body, env)
+
+    if path == "/v1/lea/process" and method == "POST":
+        body = await _read_json_body(request)
+        return await process_message_endpoint(body, env)
 
     if path == "/v1/vault/intake" and method == "POST":
         body = await _read_json_body(request)
