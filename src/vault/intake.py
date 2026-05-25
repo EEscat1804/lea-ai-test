@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.lib.responses import json_response, problem_response
+from lib.responses import json_response, problem_response
 
 SUPPORTED_JURISDICTIONS = {
     "CA", "NY", "TX", "FL", "IL",

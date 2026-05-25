@@ -1,6 +1,6 @@
 import pytest
 
-from src.vault.intake import SUPPORTED_JURISDICTIONS, _stub_next_step
+from vault.intake import SUPPORTED_JURISDICTIONS, _stub_next_step
 
 
 def test_first_step_asks_for_petitioner_name() -> None:

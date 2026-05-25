@@ -12,7 +12,7 @@ from __future__ import annotations
 import hmac
 from typing import Any
 
-from src.lib.responses import problem_response
+from lib.responses import problem_response
 
 
 def authorize(request: Any, env: Any) -> Any | None:

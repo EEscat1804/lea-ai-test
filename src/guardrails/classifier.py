@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.lib.responses import json_response, problem_response
+from lib.responses import json_response, problem_response
 
 
 async def classify_message(body: dict[str, Any], env: Any) -> Any:

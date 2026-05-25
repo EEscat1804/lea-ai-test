@@ -1,4 +1,4 @@
-from src.persona.system_prompts import DEFAULT_PERSONA, get_persona_prompt
+from persona.system_prompts import DEFAULT_PERSONA, get_persona_prompt
 
 
 def test_default_persona_is_returned() -> None:

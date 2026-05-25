@@ -7,11 +7,13 @@ lea-be-core; lea-ai never accepts unauthenticated user traffic.
 
 from __future__ import annotations
 
-from src.guardrails.classifier import classify_message
-from src.lib.auth import authorize
-from src.lib.responses import json_response, problem_response
-from src.persona.system_prompts import get_persona_prompt
-from src.vault.intake import handle_intake_step
+from typing import Any
+
+from guardrails.classifier import classify_message
+from lib.auth import authorize
+from lib.responses import json_response, problem_response
+from persona.system_prompts import get_persona_prompt
+from vault.intake import handle_intake_step
 
 
 async def on_fetch(request, env):  # type: ignore[no-untyped-def]
@@ -31,11 +33,11 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
         return auth_err
 
     if path == "/v1/guardrails/classify" and method == "POST":
-        body = await request.json()
+        body = await _read_json_body(request)
         return await classify_message(body, env)
 
     if path == "/v1/vault/intake" and method == "POST":
-        body = await request.json()
+        body = await _read_json_body(request)
         return await handle_intake_step(body, env)
 
     if path == "/v1/persona/prompt" and method == "GET":
@@ -43,6 +45,14 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
         return json_response({"prompt": get_persona_prompt(persona)})
 
     return problem_response(404, "not_found", f"no route for {method} {path}")
+
+
+async def _read_json_body(request: Any) -> dict[str, Any]:
+    """`request.json()` returns a Pyodide JsProxy; convert to a real Python dict."""
+    raw = await request.json()
+    if hasattr(raw, "to_py"):
+        return raw.to_py()  # type: ignore[no-any-return]
+    return raw  # type: ignore[no-any-return]
 
 
 def _path_of(url: str) -> str:
