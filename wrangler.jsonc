@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lea-ai",
+  "main": "src/worker.py",
+  "compatibility_date": "2026-05-25",
+  "compatibility_flags": ["python_workers"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+  "env": {
+    "staging": {
+      "name": "lea-ai-staging",
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
+      "routes": [
+        { "pattern": "staging-ai.lea.legali.ai/*", "custom_domain": true }
+      ]
+    },
+    "production": {
+      "name": "lea-ai-production",
+      "vars": {
+        "ENVIRONMENT": "production"
+      },
+      "routes": [
+        { "pattern": "ai.lea.legali.ai/*", "custom_domain": true }
+      ]
+    }
+  }
+}

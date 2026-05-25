@@ -1,0 +1,6 @@
+# Cloudflare Python Workers — runtime is Pyodide. Most pure-Python packages
+# work; native extensions do not. Keep this list minimal and audit each add.
+# https://developers.cloudflare.com/workers/languages/python/packages/
+
+# Pydantic (pure-Python compat path) for request/response schemas.
+pydantic>=2.0
