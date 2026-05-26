@@ -4,7 +4,7 @@
 
 # Cloudflare Workers SDK for Python — required by wrangler >= 4.x for new
 # Python worker bootstrapping (provides `workers.Response`, `workers.fetch`).
-workers-py>=1.90
+workers-py>=1.9.4
 
 # Pydantic (pure-Python compat path) for request/response schemas.
 pydantic>=2.0
