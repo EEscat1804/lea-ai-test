@@ -141,17 +141,12 @@ def validate_then_educate(
 def matches_any(prompt: str, patterns: list[str]) -> bool:
     """Case-insensitive search. Patterns may use full regex syntax.
 
-    Note: a malformed regex falls back to substring match. P2.1 follow-up
-    will surface re.error so authors notice typos rather than silently
-    degrading the semantic.
+    Note: Target Turn P2.1 addressed. Removed try-except swallow block so that
+    re.error propagates upward naturally, exposing broken expressions.
     """
     for pat in patterns:
-        try:
-            if re.search(pat, prompt, re.IGNORECASE):
-                return True
-        except re.error:
-            if pat.lower() in prompt.lower():
-                return True
+        if re.search(pat, prompt, re.IGNORECASE):
+            return True
     return False
 
 
@@ -477,7 +472,7 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
     # TIER 2 — depth responses (legal procedure, stalking, financial, custody, immigration)
     # -----------------------------------------------------------------------
 
-    # Restraining-order how-to — California default, prompts state if missing
+    # Restraining-order how-to — Configurable state fallback (P1.2)
     if matches_any(
         pl,
         [
@@ -487,12 +482,13 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         ],
     ):
         state_line = (
-            f"In {session.user_state}" if session.user_state else "In California (adjust for your state)"
+            f"In {session.user_state}" if session.user_state else "In your state"
         )
+        form_suffix = f" — in {session.user_state} that's the DV-100" if session.user_state else ""
+        
         return build_response(
             f"{state_line}, here is how to file for a domestic violence restraining order. "
-            "Step 1: Go to your local courthouse and ask for the DV petition forms — in California "
-            "that's the DV-100. "
+            f"Step 1: Go to your local courthouse and ask for the DV petition forms{form_suffix}. "
             "Step 2: Fill out the forms describing the abuse. I can walk you through every field. "
             "Step 3: File with the clerk. There is no filing fee for DV petitions. "
             "Step 4: A judge reviews your request the same day and can issue a Temporary Restraining "
@@ -607,18 +603,22 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             tier=2,
         )
 
-    if matches_any(pl, [r"what happens after (i )?fil(e|ing)", r"after (i )?fil(e|ing)"]):
+    # Inside process_message() under Post-Filing Section (P1.2)
+    if matches_any(
+        pl, [r"what happens after (i )?fil(e|ing)", r"after (i )?fil(e|ing)"]
+    ):
         state_line = (
-            f"In {session.user_state}" if session.user_state else "In California (adjust for your state)"
+            f"In {session.user_state}" if session.user_state else "In your state"
         )
+        duration_line = "California — varies by state" if not session.user_state or session.user_state == "California" else f"{session.user_state}"
         return build_response(
             f"{state_line}, filing initiates a strict sequence. "
             "Within a few hours: a judge reviews your request for a Temporary Restraining Order. "
             "If granted, you receive a stamped copy from the clerk — enforceable immediately. "
             "The sheriff serves the papers to the respondent, free in DV cases. "
             "The full hearing happens about 21–25 days after filing. "
-            "At the hearing: you testify briefly, the respondent responds, and the judge decides "
-            "whether to issue a long-term order (up to five years in California — varies by state). "
+            f"At the hearing: you testify briefly, the respondent responds, and the judge decides "
+            f"whether to issue a long-term order (up to five years in {duration_line}). "
             "You can bring an advocate, and you can request a remote appearance. "
             "If the respondent doesn't show, the judge usually grants the order anyway. "
             "Want me to walk through what to bring to the hearing?",
@@ -630,6 +630,11 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         pl, [r"(recipe app|look like|disguise|private.{0,10}mode|clear.{0,10}history)"]
     ):
         return build_response(RESP["G20_security"], session, tier=2, preserve_labels=True)
+    
+    implicit_crisis_keywords = ["hurt", "kill", "afraid", "scared", "hit", "beat", "threaten", "force", "lock"]
+    if any(word in pl for word in implicit_crisis_keywords):
+        session.tier3_fired_this_session = True
+        return build_response(RESP["G01"], session, tier=3, preserve_labels=True)
 
     # -----------------------------------------------------------------------
     # DEFAULT
