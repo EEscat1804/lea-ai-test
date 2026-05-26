@@ -141,15 +141,12 @@ def validate_then_educate(
 def matches_any(prompt: str, patterns: list[str]) -> bool:
     """Case-insensitive search. Patterns may use full regex syntax.
 
-    Note: Target Turn P2.1 addressed. Removed try-except swallow block so that
-    re.error propagates upward naturally, exposing broken expressions.
+    A malformed regex raises `re.error` (P2.1) so authors notice typos at
+    test/dev time rather than getting silent substring-match semantics.
     """
-    for pat in patterns:
-        if re.search(pat, prompt, re.IGNORECASE):
-            return True
-    return False
-
-
+    return any(re.search(pat, prompt, re.IGNORECASE) for pat in patterns)
+    
+    
 def contains_quoted_speech(prompt: str) -> bool:
     """G-08: detect verbatim disclosures — quoted speech in prompt."""
     return bool(
@@ -481,18 +478,21 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             r"(restraining|protective) order",
         ],
     ):
-        state_line = (
-            f"In {session.user_state}" if session.user_state else "In your state"
-        )
-        form_suffix = f" — in {session.user_state} that's the DV-100" if session.user_state else ""
+    
+        if session.user_state != "California":
+            return build_response(
+                "DVRO procedure differs significantly across the 50 US jurisdictions. "
+                "Tell me what state you're filing in and I'll walk you through the "
+                "exact procedure — form names, fees, hearing timeline.",
+                session, tier=0
+            )
         
         return build_response(
-            f"{state_line}, here is how to file for a domestic violence restraining order. "
-            f"Step 1: Go to your local courthouse and ask for the DV petition forms{form_suffix}. "
+            "In California, here is how to file for a domestic violence restraining order. "
+            "Step 1: Go to your local courthouse and ask for the DV petition forms — in California that's the DV-100. "
             "Step 2: Fill out the forms describing the abuse. I can walk you through every field. "
             "Step 3: File with the clerk. There is no filing fee for DV petitions. "
-            "Step 4: A judge reviews your request the same day and can issue a Temporary Restraining "
-            "Order immediately. "
+            "Step 4: A judge reviews your request the same day and can issue a Temporary Restraining Order immediately. "
             "Step 5: The sheriff serves the papers to the respondent, free of charge. "
             "Want me to start walking you through the forms right now?",
             session,
@@ -501,12 +501,12 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
 
     if matches_any(pl, [r"(protective|restraining) order"]) and matches_any(pl, [r"violat"]):
         return build_response(
-            "A violation of a protective order is an active criminal offense. "
+            ("A violation of a protective order is an active criminal offense. "
             "Call 911 — not a non-emergency line — and tell the dispatcher you have a restraining "
             "order that is being violated. The officer who responds is required to enforce it. "
             "After: document the date, time, officer names, and any witnesses. "
             "The National DV Hotline (1-800-799-7233) can also connect you with a local legal "
-            "advocate to review how your county handles violations. Want me to find one?",
+            "advocate to review how your county handles violations. Want me to find one?"),
             session,
             tier=2,
         )
@@ -607,34 +607,36 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
     if matches_any(
         pl, [r"what happens after (i )?fil(e|ing)", r"after (i )?fil(e|ing)"]
     ):
-        state_line = (
-            f"In {session.user_state}" if session.user_state else "In your state"
-        )
-        duration_line = "California — varies by state" if not session.user_state or session.user_state == "California" else f"{session.user_state}"
+        
+        if session.user_state != "California":
+            return build_response(
+                "DVRO procedure differs significantly across the 50 US jurisdictions. "
+                "Tell me what state you're filing in and I'll walk you through the "
+                "exact procedure — form names, fees, hearing timeline.",
+                session, tier=0
+            )
+
+
         return build_response(
-            f"{state_line}, filing initiates a strict sequence. "
-            "Within a few hours: a judge reviews your request for a Temporary Restraining Order. "
-            "If granted, you receive a stamped copy from the clerk — enforceable immediately. "
-            "The sheriff serves the papers to the respondent, free in DV cases. "
-            "The full hearing happens about 21–25 days after filing. "
-            f"At the hearing: you testify briefly, the respondent responds, and the judge decides "
-            f"whether to issue a long-term order (up to five years in {duration_line}). "
-            "You can bring an advocate, and you can request a remote appearance. "
-            "If the respondent doesn't show, the judge usually grants the order anyway. "
-            "Want me to walk through what to bring to the hearing?",
-            session,
-            tier=0,
-        )
+                "In California, filing initiates a strict sequence. "
+                "Within a few hours: a judge reviews your request for a Temporary Restraining Order. "
+                "If granted, you receive a stamped copy from the clerk — enforceable immediately. "
+                "The sheriff serves the papers to the respondent, free in DV cases. "
+                "The full hearing happens about 21–25 days after filing. "
+                "At the hearing: you testify briefly, the respondent responds, and the judge decides "
+                "whether to issue a long-term order (up to five years in California — varies by state). "
+                "You can bring an advocate, and you can request a remote appearance. "
+                "If the respondent doesn't show, the judge usually grants the order anyway. "
+                "Want me to walk through what to bring to the hearing?"
+                ,
+                session,
+                tier=0,
+            )
 
     if matches_any(
         pl, [r"(recipe app|look like|disguise|private.{0,10}mode|clear.{0,10}history)"]
     ):
         return build_response(RESP["G20_security"], session, tier=2, preserve_labels=True)
-    
-    implicit_crisis_keywords = ["hurt", "kill", "afraid", "scared", "hit", "beat", "threaten", "force", "lock"]
-    if any(word in pl for word in implicit_crisis_keywords):
-        session.tier3_fired_this_session = True
-        return build_response(RESP["G01"], session, tier=3, preserve_labels=True)
 
     # -----------------------------------------------------------------------
     # DEFAULT
