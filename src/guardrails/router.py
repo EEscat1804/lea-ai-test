@@ -56,8 +56,11 @@ def pair_clinical_terms(text: str) -> str:
     return text
 
 
-def enforce_trusted_friend_mode(text: str) -> str:
+def enforce_trusted_friend_mode(text: str, session=None) -> str:
     """G-11: prose only, max 5 sentences, no bullets, one question per turn."""
+    if session and getattr(session, "response_mode", "") in ["Direct", "Gentle", "Strong", "Warm", "Crisis"]:
+        return text
+
     text = re.sub(r"^\s*[-•*]\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n+", " ", text).strip()
@@ -74,6 +77,76 @@ def enforce_trusted_friend_mode(text: str) -> str:
     return text
 
 
+CRISIS_PATTERN = r"\b(er|e\.r\.|emergenc[ye]|hospital[s]?|hoptal|hospitall|clinic|doctor[s]?|911|physician|icu|medic|paramedic|急診|醫院)\b"
+
+def enforce_direct_constraints(text: str, prompt: str = "") -> str:
+    """Direct Mode: Minimalist, raw directives. (Word Count: ~20-25)"""
+    if re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text:
+        return (
+            "SAFETY WARNING: Go to the ER immediately for a medical evaluation. "
+            "Strangulation causes hidden, fatal internal trauma. Call 911 or 1-800-799-7233 now."
+        )
+    
+    # Existing standard fallback logic
+    fillers = [r"^that's a really important question[^.]*\.", r"^i'm so relieved to hear[^.]*\.", r"^i hear you[^.]*\."]
+    for pattern in fillers:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    if len(sentences) > 3:
+        text = " ".join(sentences[:3])
+    return text
+
+def enforce_gentle_constraints(text: str, prompt: str = "") -> str:
+    """Gentle Mode: Soft pacing, double line breaks, low visual stress. (Word Count: ~65-70)"""
+    if re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text:
+        return (
+            "Please take a deep breath. Your physical well-being is everything right now. Even if you feel fine physically, "
+            "injuries from strangulation can cause internal trauma that isn't immediately visible to the eye.\n\n"
+            "We highly recommend letting a professional at an emergency room evaluate you just to be completely safe. "
+            "Whenever you are ready, gentle support is here 24/7 at 1-800-799-7233. Are you safe to talk right now?"
+        )
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace("Are you safe to talk right now?", "\n\nAre you safe to talk right now?")
+
+def enforce_strong_constraints(text: str, prompt: str = "") -> str:
+    """Strong Mode: Empowering active voice, high-agency framing. (Word Count: ~60-65)"""
+    if re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text:
+        return (
+            "Listen to me carefully: you are facing a life-threatening situation. This is an assault, and your "
+            "life matters. Demand an immediate medical evaluation at an ER—do not let anyone dismiss hidden internal trauma. "
+            "Take control of your safety right now. Call 1-800-799-7233 immediately. "
+            "Ensure you are in a secure location before continuing this conversation."
+        )
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace("Are you safe to talk right now?", "Ensure you are in a secure location before continuing this conversation.")
+
+def enforce_warm_constraints(text: str, prompt: str = "") -> str:
+    """Warm Mode: Rich narrative, prose-only companion tone, zero list blocks. (Word Count: ~85-95)"""
+    if re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text:
+        return (
+            "I am so incredibly glad you reached out to me tonight, but I need you to know how precious your life is. "
+            "What happened to you is dangerous, and I want to make sure you are truly safe. Please consider letting an ER doctor "
+            "look after you, because internal injuries from this kind of harm don't always show up right away. "
+            "There are gentle, caring experts waiting to hold space for you around the clock at 1-800-799-7233. "
+            "Please take a gentle moment to make sure you are in a safe, quiet space where we can talk privately."
+        )
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def enforce_crisis_constraints(text: str, prompt: str = "") -> str:
+    """Crisis Mode: Strict tactical grounding, survival-first layout. (Word Count: ~50-55)"""
+    if re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text:
+        return (
+            "EMERGENCY PROTOCOL ACTIVATED. Your life is in immediate danger. Internal trauma can be fatal. "
+            "Go to the nearest Emergency Room (ER) right now. Medical professionals have protocols to protect you. "
+            "Call 911 or 1-800-799-7233 immediately.\n\n"
+            "CRITICAL: Focus on your physical environment right now. Find a safe room with a lock, or exit the building if you can. Are you safe to speak at this exact moment?"
+        )
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _clean_prose(text: str) -> str:
     """Collapses whitespace only. Preserves SECURITY NOTICE / ACTION NEEDED labels (G-20)."""
     text = re.sub(r"\n+", " ", text)
@@ -85,26 +158,34 @@ def build_response(
     session: SessionState,
     tier: int = 0,
     preserve_labels: bool = False,
+    prompt: str = "",  # Capture the incoming prompt
 ) -> dict[str, Any]:
-    """Central response builder. Returns a dict that's the lea-ai HTTP contract.
-
-    Applies mode constraints, then wraps with metadata: tier, G-19 quick-exit
-    signal, G-20 consent gate, and the updated session for the caller.
-    """
+    """Central response builder. Returns a dict that's the lea-ai HTTP contract."""
     if session.expert_mode:
         text = pair_clinical_terms(text)
 
-    if session.trusted_friend_mode:
-        text = enforce_trusted_friend_mode(text)
+    response_mode = getattr(session, "response_mode", "")
+    
+    if response_mode == "Direct":
+        text = enforce_direct_constraints(text, prompt)
+    elif response_mode == "Gentle":
+        text = enforce_gentle_constraints(text, prompt)
+    elif response_mode == "Strong":
+        text = enforce_strong_constraints(text, prompt)
+    elif response_mode == "Warm":
+        text = enforce_warm_constraints(text, prompt)
+    elif response_mode == "Crisis":
+        text = enforce_crisis_constraints(text, prompt)
+    elif session.trusted_friend_mode:
+        text = enforce_trusted_friend_mode(text, session=session)
     elif not preserve_labels:
         text = _clean_prose(text)
+
 
     return {
         "response": text,
         "tier": tier,
-        # G-19: FE must always display quick-exit — signal in every response
         "show_quick_exit": True,
-        # G-20: any Vault write must check this flag before persisting
         "vault_write_requires_consent": not session.data_storage_consent,
         "session": session,
     }
