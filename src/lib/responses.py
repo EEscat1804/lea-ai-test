@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 from typing import Any
+
 try:
-    from workers import Response  
+    from workers import Response
 except ImportError:
     Response = None  
 
