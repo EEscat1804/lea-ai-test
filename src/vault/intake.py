@@ -188,7 +188,10 @@ def determine_next_step(
     for step in TIER_1_FLOW:
         field = step["field"]
         if field not in answers:
-            schema_overlay = step["schema"].copy()
+            # Explicitly type-cast the dictionary to satisfy mypy
+            step_dict: dict[str, Any] = step
+            schema_overlay = step_dict["schema"].copy()
+            
             if field == "relationship.type" and jurisdiction == "CA":
                 schema_overlay["enum"] = [
                     "married",
@@ -199,7 +202,7 @@ def determine_next_step(
                 ]
             return {
                 "step": field,
-                "prompt": step["prompt"],
+                "prompt": step_dict["prompt"],
                 "schema": schema_overlay,
             }
 

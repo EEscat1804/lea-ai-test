@@ -13,8 +13,7 @@ from typing import Any
 try:
     from workers import Response
 except ImportError:
-    Response = None  # type: ignore[assignment, misc]
-
+    Response = None  
 
 def json_response(payload: dict[str, Any], status: int = 200) -> Any:
     body = json.dumps(payload)
