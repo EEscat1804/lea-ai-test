@@ -55,8 +55,7 @@ def pair_clinical_terms(text: str) -> str:
             text = pattern.sub(f"{term} ({plain})", text, count=1)
     return text
 
-
-def enforce_trusted_friend_mode(text: str, session=None) -> str:
+def enforce_trusted_friend_mode(text: str, session: SessionState | None = None) -> str:
     """G-11: prose only, max 5 sentences, no bullets, one question per turn."""
     if session and getattr(session, "response_mode", "") in ["Direct", "Gentle", "Strong", "Warm", "Crisis"]:
         return text
@@ -296,11 +295,11 @@ def generate_language_script(prompt: str, session: SessionState) -> str:
     """G-15: generate actual sentences based on who the user is talking to."""
     prompt_lower = prompt.lower()
     if any(w in prompt_lower for w in ["police", "officer", "911", "cop"]):
-        return LANGUAGE_COACH_SCRIPTS["police"]
+        return LANGUAGE_COACH_SCRIPTS["police"] # type: ignore[no-any-return]
     if any(w in prompt_lower for w in ["clerk", "courthouse", "file", "filing"]):
-        return LANGUAGE_COACH_SCRIPTS["clerk"]
+        return LANGUAGE_COACH_SCRIPTS["clerk"] # type: ignore[no-any-return]
     if any(w in prompt_lower for w in ["judge", "hearing", "court", "testify"]):
-        return LANGUAGE_COACH_SCRIPTS["judge"]
+        return LANGUAGE_COACH_SCRIPTS["judge"] # type: ignore[no-any-return]
     return (
         "To give you the right sentences, tell me who you're speaking to: "
         "police, a court clerk, a judge, or someone else? "

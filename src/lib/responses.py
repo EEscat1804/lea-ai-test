@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import json
 from typing import Any
-
 try:
-    from workers import Response  # type: ignore[import-not-found]
+    from workers import Response  
 except ImportError:
-    Response = None  # type: ignore[assignment,misc]
+    Response = None  
 
 
 def json_response(payload: dict[str, Any], status: int = 200) -> Any:
