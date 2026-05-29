@@ -420,9 +420,4 @@ def enforce_trusted_friend_mode(text: str, session: SessionState | None = None) 
     
     # 3. Capitalize and isolate individual sentences precisely
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    if len(sentences) > 5:
-        text = " ".join(sentences[:5])
-    else:
-        text = " ".join(sentences)
-        
-    return text
+    return " ".join(sentences[:5]) if len(sentences) > 5 else " ".join(sentences)
