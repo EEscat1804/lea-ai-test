@@ -82,11 +82,11 @@ class PersonaFeatureManager:
     def _generate_language_script(self, prompt_lower: str) -> str:
         """G-15: generate actual sentences based on who the user is talking to."""
         if any(w in prompt_lower for w in ["police", "officer", "911", "cop"]):
-            return LANGUAGE_COACH_SCRIPTS["police"]
+            return str(LANGUAGE_COACH_SCRIPTS["police"])
         if any(w in prompt_lower for w in ["clerk", "courthouse", "file", "filing"]):
-            return LANGUAGE_COACH_SCRIPTS["clerk"]
+            return str(LANGUAGE_COACH_SCRIPTS["clerk"])
         if any(w in prompt_lower for w in ["judge", "hearing", "court", "testify"]):
-            return LANGUAGE_COACH_SCRIPTS["judge"]
+            return str(LANGUAGE_COACH_SCRIPTS["judge"])
         return (
             "To give you the right sentences, tell me who you're speaking to: "
             "police, a court clerk, a judge, or someone else? "
