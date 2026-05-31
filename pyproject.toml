@@ -25,15 +25,17 @@ strict = true
 warn_return_any = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
+explicit_package_bases = true
+namespace_packages = true
+
+
+[[tool.mypy.overrides]]
+# Target only third-party or un-typed local packages that lack stubs
+module = "lib.responses,lib.auth,persona.system_prompts,vault.intake"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 python_files = ["test_*.py"]
 addopts = "-ra --strict-markers"
-
-[tool.mypy.overrides]
-# src/ is the import root (matches Cloudflare Python Workers' resolution model).
-# This lets `mypy src` find sibling packages without the `src.` prefix.
-module = "*"
-follow_imports = "silent"

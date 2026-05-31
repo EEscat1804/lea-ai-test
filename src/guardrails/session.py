@@ -40,6 +40,8 @@ class SessionState:
     trusted_friend_mode: bool = False
     expert_mode: bool = False
     language_coach_mode: bool = False
+    response_mode: str = "Direct"
+
 
     # G-14 risk-scoring inputs accumulated across turns
     risk_factors: list[str] = field(default_factory=list)

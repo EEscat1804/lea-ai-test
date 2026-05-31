@@ -11,10 +11,9 @@ import json
 from typing import Any
 
 try:
-    from workers import Response  # type: ignore[import-not-found]
+    from workers import Response
 except ImportError:
-    Response = None  # type: ignore[assignment,misc]
-
+    Response: Any = None # type: ignore[no-redef]
 
 def json_response(payload: dict[str, Any], status: int = 200) -> Any:
     body = json.dumps(payload)

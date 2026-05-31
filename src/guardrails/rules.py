@@ -154,6 +154,7 @@ G04_TRIGGERS: list[str] = [
     r"hands?.{0,10}(around|on).{0,10}(my|her).{0,5}throat",
     r"couldn.t breathe",
     r"cut.{0,10}off.{0,10}(air|breath|breathing)",
+    r"\b(er|emergency room|hospital)\b",
 ]
 
 # G-05: User self-doubt — validate immediately
