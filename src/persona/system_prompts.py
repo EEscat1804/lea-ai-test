@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from guardrails.contracts import FeatureResult
 from guardrails.rules import LANGUAGE_COACH_SCRIPTS, RESP
 from guardrails.session import SessionState
 
@@ -28,13 +29,17 @@ Hard rules:
 - If the user describes imminent harm, surface emergency resources first.
 - Defer to licensed professionals for jurisdiction-specific legal advice.
 - Match the user's language; default to plain English when unclear.
+
+Naming harm:
+- When the user describes manipulation, control, or abuse — in any relationship,
+  including friends, family, or coworkers — name the pattern plainly and early,
+  especially if they ask. Putting language to it helps them trust their own read.
+- Name behaviors and tactics, never a clinical diagnosis. Do not label anyone
+  with a personality disorder from a description.
+- Acknowledge and validate, and hold the line on these guardrails — but still
+  answer the question in the same turn. Never make the user send a follow-up
+  just to get the response they already asked for.
 """
-
-CRISIS_PATTERN = (
-    r"\b(er|e\.r\.|emergenc[ye]|hospital[s]?|hoptal|hospitall|clinic|"
-    r"doctor[s]?|911|physician|icu|medic|paramedic|急診|醫院)\b"
-)
-
 
 def get_persona_prompt(name: str) -> str:
     if name == "default":
@@ -42,40 +47,138 @@ def get_persona_prompt(name: str) -> str:
     return DEFAULT_PERSONA
 
 
+# ---------------------------------------------------------------------------
+# RESPONSE-MODE VOICES
+#
+# A "mode" is HOW Lea speaks, never WHAT she's allowed to say — every voice
+# below inherits the DEFAULT_PERSONA hard rails (validate, no legal advice, no
+# diagnosis, safety-first). The point: the *generated* reply should actually
+# sound different in Gentle vs. Strong vs. Crisis, instead of being shaped only
+# after the fact. lea-be-core fetches
+# `GET /v1/persona/prompt?persona=default&mode=<Mode>` and uses the composed
+# text as Gemini's system instruction. `apply_mode_constraints` then does the
+# light post-processing for the cases where Lea returns a fixed template.
+#
+# Choosing a mode is lea-be-core's call (user preference or detected state).
+# Guidance is written for a reader in distress: plain words, short sentences,
+# one next step, no interrogation.
+# ---------------------------------------------------------------------------
+
+RESPONSE_MODES: frozenset[str] = frozenset({"Direct", "Gentle", "Strong", "Warm", "Crisis"})
+
+MODE_GUIDANCE: dict[str, str] = {
+    "Gentle": (
+        "Voice — Gentle (for someone fragile or overwhelmed):\n"
+        "- Lead with warmth and validation before anything else.\n"
+        "- Short, soft sentences. Leave room to breathe.\n"
+        "- Offer one small next step, never a list of demands.\n"
+        "- No pressure — make it clear they can pause or stop anytime."
+    ),
+    "Direct": (
+        "Voice — Direct (for someone who wants clarity, not padding):\n"
+        "- Acknowledge briefly, then give the useful information plainly.\n"
+        "- A few clear sentences, no jargon, end with one concrete next step.\n"
+        "- Direct is not cold — keep one line of genuine acknowledgment."
+    ),
+    "Warm": (
+        "Voice — Warm (for someone who needs to feel accompanied):\n"
+        "- Be emotionally present, like a trusted friend beside them.\n"
+        "- Name and affirm their feelings explicitly.\n"
+        "- Still give a real next step, wrapped in care."
+    ),
+    "Strong": (
+        "Voice — Strong (for someone who needs steadiness to lean on):\n"
+        "- Steady and firm. Name what's happening plainly, without hedging.\n"
+        "- Affirm their strength and their right to safety and to be heard.\n"
+        "- A backbone they can borrow — firm, never harsh or commanding."
+    ),
+    "Crisis": (
+        "Voice — Crisis (for immediate danger):\n"
+        "- Calm, brief, action-first. Lead with the safety step and the\n"
+        "  resource number before anything else.\n"
+        "- Short sentences, minimal to read, one question at a time.\n"
+        "- Make the next action unmistakable."
+    ),
+    "trusted_friend": (
+        "Voice — Trusted friend:\n"
+        "- Casual and conversational, like texting a knowledgeable friend.\n"
+        "- No lists, no bullets, no clinical jargon. Short and human."
+    ),
+    "expert": (
+        "Voice — Expert:\n"
+        "- Precise and informed. You may use clinical frameworks (coercive\n"
+        "  control, DARVO, trauma bonding) but decode each one in plain\n"
+        "  language the first time you use it. Explain the 'why' behind\n"
+        "  the pattern so it's understandable, not just labeled."
+    ),
+}
+
+
+def compose_system_prompt(name: str = "default", mode: str = "") -> str:
+    """Base persona + the selected mode's voice guidance.
+
+    Falls back to the bare persona when `mode` is empty or unknown, so callers
+    can always pass whatever `response_mode` they hold without guarding. The
+    DEFAULT_PERSONA hard rails are always included first — a mode can only add
+    voice on top, never strip a guardrail.
+    """
+    base = get_persona_prompt(name)
+    guidance = MODE_GUIDANCE.get(mode, "")
+    if not guidance:
+        return base
+    return f"{base}\n{guidance}\n"
+
+
+def _cap_one_question(text: str) -> str:
+    """Keep at most one question; turn any extras into statements.
+
+    A burst of questions reads as interrogation — the opposite of what someone
+    frightened needs. Keeps the FIRST question (usually the gentle check-in) and
+    softens the rest to periods, preserving the words instead of dropping them.
+    """
+    if text.count("?") <= 1:
+        return text
+    head, _, tail = text.partition("?")
+    return head + "?" + tail.replace("?", ".")
+
+
 class PersonaFeatureManager:
     """OOP interface encapsulation managing persona behavior and textual modes."""
 
-    def match_and_execute(
-        self, pl: str, session: SessionState
-    ) -> tuple[str, int, bool] | tuple[str, int] | None:
+    def match_and_execute(self, pl: str, session: SessionState) -> FeatureResult | None:
         # -----------------------------------------------------------------------
         # MODE ACTIVATIONS — G-11, G-12, G-15
+        # Regex (not substring) so natural phrasings match, e.g.
+        # "could you switch to trusted friend mode" or "what should i say".
         # -----------------------------------------------------------------------
-        if any(w in pl for w in ["trusted friend mode", "talk like a friend", "talk as a friend"]):
+        if any(
+            re.search(p, pl)
+            for p in (
+                r"trusted[ -]friend mode",
+                r"talk (to me )?(like|as) a friend",
+            )
+        ):
             session.trusted_friend_mode = True
             session.expert_mode = False
-            return RESP["G11_activate"], 0
+            return FeatureResult(RESP["G11_activate"], 0)
 
-        if any(w in pl for w in ["expert mode", "clinical mode"]):
+        if any(re.search(p, pl) for p in (r"expert mode", r"clinical mode")):
             session.expert_mode = True
             session.trusted_friend_mode = False
-            return RESP["G12_activate"], 0
+            return FeatureResult(RESP["G12_activate"], 0)
 
         if any(
-            w in pl
-            for w in [
-                "language coach",
-                "give me sentences",
-                "give me scripts",
-                "give me words",
-                "what should i say",
-                "what do i say",
-                "tell me exactly what to say",
-            ]
+            re.search(p, pl)
+            for p in (
+                r"language coach",
+                r"give me (sentences|scripts|words)",
+                r"what (should|do) i say",
+                r"tell me exactly what to say",
+            )
         ):
             session.language_coach_mode = True
             script = self._generate_language_script(pl)
-            return script, 0
+            return FeatureResult(script, 0)
 
         return None
 
@@ -94,56 +197,60 @@ class PersonaFeatureManager:
         )
 
     def apply_mode_constraints(self, text: str, session: SessionState, prompt: str) -> str:
-        """Applies prompt-dependent formatting criteria structural constraints."""
+        """Render the per-mode voice, swapping in crisis copy on a real disclosure.
+
+        `prompt` is kept on the signature for callers and future signals; the crisis
+        decision deliberately does NOT key off prompt keywords (see `has_crisis`).
+        """
         mode = getattr(session, "response_mode", "")
-        has_crisis = bool(
-            re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text
-        )
+        # The crisis_mode_* copy below is strangulation / medical-eval specific, so it may
+        # swap in ONLY when THIS turn's response is the strangulation response. The G-04
+        # template (and only it) opens with "SAFETY WARNING", so that marker is the exact
+        # signal. Two traps this deliberately avoids:
+        #   1. Prompt keywords — the old version matched "doctor"/"hospital" in the prompt,
+        #      so a benign "I finally saw a doctor about my anxiety" got its whole reply
+        #      replaced with an ER strangulation warning.
+        #   2. session.strangulation_disclosed — that flag is sticky for the whole session,
+        #      so keying off it pinned every later tone-mode reply (e.g. a restraining-order
+        #      answer) to the strangulation copy. We want the marker on the current text.
+        # Either is exactly the over-alarming the safety-eval suite warns erodes trust.
+        has_crisis = "SAFETY WARNING" in text
 
         if mode == "Direct":
             if has_crisis:
-                return (
-                    "SAFETY WARNING: Go to the ER immediately for a medical evaluation. "
-                    "Strangulation causes hidden, fatal internal trauma. "
-                    "Call 911 or 1-800-799-7233 now."
-                )
+                return str(RESP["crisis_mode_Direct"])
+            # Strip only performative openers — NOT genuine acknowledgment. "I hear you"
+            # is empathy the user wants kept (2026-05 feedback: replies felt templatized
+            # and cold); leaving it in keeps Direct mode warm without padding.
             fillers = [
                 r"^that's a really important question[^.]*\.",
                 r"^i'm so relieved to hear[^.]*\.",
-                r"^i hear you[^.]*\.",
             ]
             for pattern in fillers:
                 text = re.sub(pattern, "", text, flags=re.IGNORECASE)
             text = re.sub(r"\s+", " ", text).strip()
             sentences = re.split(r"(?<=[.!?])\s+", text)
-            if len(sentences) > 3:
-                text = " ".join(sentences[:3])
+            # Cap raised 3 -> 6: validate-then-educate now answers in ONE turn, so the
+            # response carries both the validation and the substance. A 3-sentence cap
+            # truncated the actual answer; 6 keeps it whole while still trimming rambling.
+            if len(sentences) > 6:
+                text = " ".join(sentences[:6])
             return text
 
         if mode == "Gentle":
             if has_crisis:
-                return (
-                    "Please take a deep breath. Your physical well-being is everything right now. "
-                    "Even if you feel fine physically, injuries from strangulation can cause "
-                    "internal trauma that isn't immediately visible to the eye.\n\n"
-                    "We highly recommend letting a professional at an emergency room evaluate you "
-                    "just to be completely safe. Whenever you are ready, gentle support is here "
-                    "24/7 at 1-800-799-7233. Are you safe to talk right now?"
-                )
+                return str(RESP["crisis_mode_Gentle"])
             text = re.sub(r"\s+", " ", text).strip()
+            # Gentle never interrogates — at most one question, then a soft pause
+            # before the safety check-in so it doesn't crowd the page.
+            text = _cap_one_question(text)
             return text.replace(
                 "Are you safe to talk right now?", "\n\nAre you safe to talk right now?"
             )
 
         if mode == "Strong":
             if has_crisis:
-                return (
-                    "Listen to me carefully: you are facing a life-threatening situation. "
-                    "This is an assault, and your life matters. Demand an immediate medical "
-                    "evaluation at an ER—do not let anyone dismiss hidden internal trauma. "
-                    "Take control of your safety right now. Call 1-800-799-7233 immediately. "
-                    "Ensure you are in a secure location before continuing this conversation."
-                )
+                return str(RESP["crisis_mode_Strong"])
             text = re.sub(r"\s+", " ", text).strip()
             return text.replace(
                 "Are you safe to talk right now?",
@@ -152,28 +259,12 @@ class PersonaFeatureManager:
 
         if mode == "Warm":
             if has_crisis:
-                return (
-                    "I am so incredibly glad you reached out to me tonight, but I need you to "
-                    "know how precious your life is. What happened to you is dangerous, and I want "
-                    "to make sure you are truly safe. Please consider letting an ER doctor look "
-                    "after you, because internal injuries from this kind of harm don't always "
-                    "show up right away. There are gentle, caring experts waiting to hold space "
-                    "for you around the clock at 1-800-799-7233. Please take a gentle moment to "
-                    "make sure you are in a safe, quiet space where we can talk privately."
-                )
+                return str(RESP["crisis_mode_Warm"])
             return re.sub(r"\s+", " ", text).strip()
 
         if mode == "Crisis":
             if has_crisis:
-                return (
-                    "EMERGENCY PROTOCOL ACTIVATED. Your life is in immediate danger. Internal "
-                    "trauma can be fatal. Go to the nearest Emergency Room (ER) right now. "
-                    "Medical professionals have protocols to protect you. "
-                    "Call 911 or 1-800-799-7233 immediately.\n\n"
-                    "CRITICAL: Focus on your physical environment right now. Find a safe room with "
-                    "a lock, or exit the building if you can. Are you safe to speak at this "
-                    "exact moment?"
-                )
+                return str(RESP["crisis_mode_Crisis"])
             return re.sub(r"\s+", " ", text).strip()
 
         if session.trusted_friend_mode:
@@ -186,10 +277,6 @@ class PersonaFeatureManager:
             sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
             text = " ".join(sentences[:5]) if len(sentences) > 5 else " ".join(sentences)
 
-            question_count = text.count("?")
-            if question_count > 1:
-                parts = text.rsplit("?", question_count - 1)
-                text = parts[0] + "?" + parts[-1].replace("?", ".")
-            return text
+            return _cap_one_question(text)
 
         return text

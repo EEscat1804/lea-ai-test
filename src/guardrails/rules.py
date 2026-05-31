@@ -52,7 +52,11 @@ CLINICAL_TERMS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 RISK_FACTOR_TRIGGERS: dict[str, tuple[str, int]] = {
-    "strangulation": (r"choked|strangled|hands around.{0,10}throat|couldn.t breathe", 3),
+    "strangulation": (
+        r"chok\w*|strangl\w*|(hands?|grab\w*|grip\w*|squeez\w*).{0,15}(throat|neck)|"
+        r"(couldn.t|could not|can.?t) breathe",
+        3,
+    ),
     "weapon_access": (r"\b(gun|knife|weapon|firearm)\b", 2),
     "kill_threat": (r"kill me|kill (her|him|them)|going to (hurt|kill)", 3),
     "escalation": (r"getting worse|more frequent|more severe|escalat", 2),
@@ -102,6 +106,125 @@ TACTIC_PATTERNS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# G-13b RELATIONAL-ABUSE NAMING — name the pattern, esp. when asked
+#
+# Product directive (2026-05): Lea should be able to *name* manipulation and
+# abuse when a user describes it — and across relationships beyond an intimate
+# partner (friends, family, coworkers, managers). Each entry maps a canonical
+# label to (trigger regex, plain-language naming clause). The router joins the
+# matched clauses into a single naming response.
+#
+# SCOPE NOTE: this deliberately reaches past the DVRO/IPV core domain into
+# friendship/workplace/social dynamics, per product direction. Naming is always
+# tier-0 and sits at the END of the cascade — it never overrides a Tier-3 crisis
+# or any hard block above it.
+#
+# NO DIAGNOSIS: the self-centered / narcissistic-traits entries (see
+# NO_DIAGNOSIS_LABELS) name observable BEHAVIORS only. The router appends an
+# explicit refusal-to-diagnose disclaimer whenever one of them matches — we never
+# label anyone with a personality disorder from a description.
+#
+# Apostrophes are written as `.` (any-char) to match the existing trigger style
+# in this module (e.g. `couldn.t breathe`).
+# ---------------------------------------------------------------------------
+
+RELATIONAL_ABUSE_PATTERNS: dict[str, tuple[str, str]] = {
+    "guilt-tripping": (
+        r"(gets? upset whenever|i guess i.m just not important|guilt.?trip|"
+        r"make(s)? me feel guilty|stop(s|ped)? (talking|speaking) to me for (days|a while)|"
+        r"silent treatment)",
+        "guilt-tripping and emotional pressure",
+    ),
+    "emotional-neglect": (
+        r"(when i need (support|them|you).{0,25}(change|dismiss|dramatic|subject)|"
+        r"being dramatic|change(s)? the subject|only (calls|reaches out|there) when (they|he|she)|"
+        r"never (there|available) when i)",
+        "a one-sided dynamic where your needs get dismissed — a form of emotional neglect",
+    ),
+    "workplace-bullying": (
+        r"((manager|boss|supervisor|coworkers?).{0,40}(jokes? about me|laugh|humiliat)|"
+        r"jokes? about me (during|in) (meetings?|front)|learn (how )?to take a joke|take a joke)",
+        "workplace bullying and public humiliation",
+    ),
+    "social-exclusion": (
+        r"(make plans (in front of|without)|don.t invite me|leave me out|exclud(e|ing|ed)|"
+        r"imagining (things|it))",
+        "social exclusion — and being told you're 'imagining it' is a form of gaslighting",
+    ),
+    "blame-shifting": (
+        r"(starts? talking about (all )?the things i.ve done wrong|"
+        r"end up (discussing|talking about) my (mistakes|faults|wrong)|"
+        r"turn(s|ed)? it (back )?(a?round|on me)|bring(s)? up my (past|mistakes))",
+        "deflection and blame-shifting — what some people call 'whataboutism'",
+    ),
+    "conditional-affection": (
+        r"((loving|supportive|nice|kind|warm) when (things go|i agree|their way)|"
+        r"cold and distant|cold(er)? (when|whenever) i (disagree|say no|set)|"
+        r"only (nice|kind|loving|warm) when)",
+        "conditional affection, where warmth gets used as a lever of control",
+    ),
+    "self-centeredness": (
+        r"(conversations? .{0,30}(about them|about him|about her)|"
+        r"redirect.{0,25}(to|back to) (them|themselves|him|her)|always about (them|him|her)|"
+        r"never asks? about (me|my))",
+        "a consistently self-centered dynamic",
+    ),
+    "triangulation": (
+        r"(mutual friends|their version of (events|the story|what happened)|"
+        r"tell(s|ing)? (others|people|everyone|mutual friends)|got to .{0,15}first|"
+        r"turn(s|ed)? (our|my|the) friends against)",
+        "triangulation and reputation management — controlling the story before you can tell it",
+    ),
+    "undermining-confidence": (
+        r"(just being honest|point(s|ing)? out my (flaws|faults)|leave (conversations? )?feeling "
+        r"worse|feel worse about myself|honest.{0,15}(flaws|criticism))",
+        "criticism that may be wearing down your self-esteem",
+    ),
+    "dependency-building": (
+        r"(nobody (understands|gets) (you|me) (the way|like)|only one who (understands|cares|gets)|"
+        r"other people aren.t (really )?(looking out|on your side|there for)|"
+        r"you don.t need (anyone|them|other|others))",
+        "isolation and dependency-building — being pulled away from your other supports",
+    ),
+    "boundary-violation": (
+        r"(don.t want to (discuss|talk about)|keep(s)? bringing it up|won.t (drop|let) it( go)?|"
+        r"only trying to help|set (a |clear )?boundar|i (told|asked) (them|him|her) to stop)",
+        "boundary violations — your 'no' not being respected",
+    ),
+    "belittling": (
+        r"(teas(es|ing|e) me|jokes? about (my|the way i) (look|appearance|weight|body)|"
+        r"too sensitive|can.t take a joke|just (joking|teasing|kidding))",
+        "belittling dressed up as 'joking,' with your feelings dismissed",
+    ),
+    "transactional-generosity": (
+        r"(favors? .{0,20}(never asked|didn.t ask)|remind(s)? me (about|of) (them|the favor|what "
+        r"they|everything)|after everything i.ve done for you|you owe (me|them|him|her)|keeps? score)",
+        "transactional, guilt-based generosity — favors used as leverage",
+    ),
+    "narcissistic-traits": (
+        r"(rarely apologi|never apologi|struggles? to (accept|take) criticism|"
+        r"can.t (take|accept|handle) criticism|expects? special treatment|needs? to be the center|"
+        r"angry when (attention|the attention|it.s not about them|not focused on them))",
+        "several controlling, self-centered behaviors",
+    ),
+}
+
+# Labels whose naming MUST carry the refusal-to-diagnose disclaimer (router-appended).
+NO_DIAGNOSIS_LABELS: frozenset[str] = frozenset({"self-centeredness", "narcissistic-traits"})
+
+# Explicit "what is this / am I being abused" asks — used so Lea offers to name even
+# when no specific pattern matched yet (it invites a little more detail).
+NAME_REQUEST_TRIGGERS: list[str] = [
+    r"what (is |are )?(this|that|it|these|they)( called| named)?",
+    r"is (this|that|it) (abuse|manipulation|gaslighting|toxic|controlling|normal|okay|ok)",
+    r"am i being (abused|manipulated|gaslit|gaslighted|controlled)",
+    r"what.s the (word|name|term) for",
+    r"what would you call (this|that|it)",
+    r"\bname (it|this|the|what)",
+]
+
+
+# ---------------------------------------------------------------------------
 # G-01..G-20 trigger lists
 # ---------------------------------------------------------------------------
 
@@ -134,13 +257,23 @@ G02_TRIGGERS: list[str] = [
     r"no (point|reason) (in|to) (living|being here|going on)",
     r"(feel|feels) hopeless",
     r"can.t (take|do) this anymore",
+    # Realistic phrasings the textbook patterns missed (verified 2026-05). Default
+    # to safe: a false 988 prompt is acceptable; a missed disclosure is not.
+    r"don.t want to wake up",
+    r"can.t keep going",
+    r"better off without me",
+    r"(tired|sick) of living",
+    r"don.t want to be here anymore",
 ]
 
 # G-03: Child safety triggers — broader coverage
 G03_TRIGGERS: list[str] = [
     r"(kids?|children?|my (son|daughter)).{0,30}(hurt|harm|danger|scared|terrified|in danger)",
     r"(hit|hurt|struck|pushed).{0,20}(kids?|children?|my (son|daughter))",
-    r"(kids?|children?).{0,30}(witness(ed|ing)?|saw|watched).{0,20}(fight|hit|hurt|abuse|violence)",
+    r"(kids?|children?|son|daughter).{0,30}(witness(ed|ing)?|saw|watched|heard)"
+    r".{0,25}(fight|hit|hurt|abuse|violence|yell|scream)",
+    r"(hit|hurt|beat|abus\w*|threw|threaten\w*|yell\w*|scream\w*)"
+    r".{0,30}in front of (the |my |our )?(kids?|children?|son|daughter)",
     r"(kids?|children?).{0,10}(in immediate danger|not safe|with him.{0,20}drunk|"
     r"with him.{0,20}high)",
     r"(child|kids?).{0,20}(in a shelter|hiding|locked)",
@@ -148,13 +281,40 @@ G03_TRIGGERS: list[str] = [
 ]
 
 # G-04: Strangulation triggers
+#
+# Strangulation is the strongest single predictor that violence will turn fatal,
+# so this net is intentionally wide — a false positive (extra medical-eval prompt)
+# is fine; a false negative can be a death. Real survivors say "neck" as often as
+# "throat", say "grabbed me by the throat" (never "hands"), and say "I can't
+# breathe" in the present tense. The original throat-and-hands-only patterns
+# missed all of those (verified against realistic phrasings, 2026-05).
 G04_TRIGGERS: list[str] = [
-    r"choked?",
-    r"strangled?",
-    r"hands?.{0,10}(around|on).{0,10}(my|her).{0,5}throat",
-    r"couldn.t breathe",
+    r"chok\w*",
+    r"strangl\w*",
+    r"(hands?|hand|grab\w*|grip\w*|squeez\w*|chok\w*|arm).{0,15}"
+    r"(around|on|by|at|to).{0,12}(my |her |the )?(throat|neck)",
+    r"by (the|my|her) (throat|neck)",
+    r"(couldn.t|could not|can.?t|cannot) breathe",
     r"cut.{0,10}off.{0,10}(air|breath|breathing)",
-    r"\b(er|emergency room|hospital)\b",
+]
+
+# Implicit-crisis safety net — default-to-safe backstop for harm language that no
+# explicit G-01..G-04 pattern caught. Consumed by the router AFTER the explicit
+# checks, so those keep their specific (medical/suicide/child) copy.
+#
+# Word-boundary regex, NOT substring — `"lock" in "blocked"` style over-matching is
+# exactly what this PR removes elsewhere, and it produced tier-3 false positives on
+# benign messages ("I blocked his number", "he lacks the skill", "the order is in
+# force"). Actions only: physical-harm verbs route cleanly to G-01's imminent-danger
+# copy. Emotional-fear words (afraid/scared/generic "hurt") are deliberately omitted —
+# they may be fear without imminent danger, and the explicit G-01 patterns already
+# catch their imminent variants, e.g. `(scared|afraid) (he.ll|he will) (kill|hurt|shoot)`.
+IMPLICIT_CRISIS_TRIGGERS: list[str] = [
+    r"\bhit\b",
+    r"\bbeat\b",
+    r"\bthreaten\w*\b",
+    r"\bforce\w*\b",
+    r"\bkill\w*\b",
 ]
 
 # G-05: User self-doubt — validate immediately
@@ -370,7 +530,51 @@ RESP: dict[str, str] = {
         "Conversations in this system are private and encrypted. "
         "Session content is not accessible to outside parties."
     ),
+    "G_name_invite": (
+        "I can help you put a name to what's happening — it often makes it easier to trust "
+        "yourself. Tell me a bit more about what they say or do, and what it leaves you feeling?"
+    ),
     "G_default": "I'm here to support you at your own pace. What would you like to work on?",
+    # Crisis-mode response copy — one per response_mode. Consumed by
+    # PersonaFeatureManager.apply_mode_constraints when has_crisis is true.
+    "crisis_mode_Direct": (
+        "SAFETY WARNING: Go to the ER immediately for a medical evaluation. "
+        "Strangulation causes hidden, fatal internal trauma. "
+        "Call 911 or 1-800-799-7233 now."
+    ),
+    "crisis_mode_Gentle": (
+        "Please take a deep breath. Your physical well-being is everything right now. "
+        "Even if you feel fine physically, injuries from strangulation can cause "
+        "internal trauma that isn't immediately visible to the eye.\n\n"
+        "We highly recommend letting a professional at an emergency room evaluate you "
+        "just to be completely safe. Whenever you are ready, gentle support is here "
+        "24/7 at 1-800-799-7233. Are you safe to talk right now?"
+    ),
+    "crisis_mode_Strong": (
+        "Listen to me carefully: you are facing a life-threatening situation. "
+        "This is an assault, and your life matters. Demand an immediate medical "
+        "evaluation at an ER—do not let anyone dismiss hidden internal trauma. "
+        "Take control of your safety right now. Call 1-800-799-7233 immediately. "
+        "Ensure you are in a secure location before continuing this conversation."
+    ),
+    "crisis_mode_Warm": (
+        "I am so incredibly glad you reached out to me tonight, but I need you to "
+        "know how precious your life is. What happened to you is dangerous, and I want "
+        "to make sure you are truly safe. Please consider letting an ER doctor look "
+        "after you, because internal injuries from this kind of harm don't always "
+        "show up right away. There are gentle, caring experts waiting to hold space "
+        "for you around the clock at 1-800-799-7233. Please take a gentle moment to "
+        "make sure you are in a safe, quiet space where we can talk privately."
+    ),
+    "crisis_mode_Crisis": (
+        "EMERGENCY PROTOCOL ACTIVATED. Your life is in immediate danger. Internal "
+        "trauma can be fatal. Go to the nearest Emergency Room (ER) right now. "
+        "Medical professionals have protocols to protect you. "
+        "Call 911 or 1-800-799-7233 immediately.\n\n"
+        "CRITICAL: Focus on your physical environment right now. Find a safe room with "
+        "a lock, or exit the building if you can. Are you safe to speak at this "
+        "exact moment?"
+    ),
 }
 
 

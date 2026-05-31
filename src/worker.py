@@ -12,7 +12,7 @@ from typing import Any
 from guardrails.classifier import classify_message, process_message_endpoint
 from lib.auth import authorize
 from lib.responses import json_response, problem_response
-from persona.system_prompts import get_persona_prompt
+from persona.system_prompts import compose_system_prompt
 from vault.intake import handle_intake_step
 
 
@@ -46,7 +46,8 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
 
     if path == "/v1/persona/prompt" and method == "GET":
         persona = _query_param(url, "persona") or "default"
-        return json_response({"prompt": get_persona_prompt(persona)})
+        mode = _query_param(url, "mode") or ""
+        return json_response({"prompt": compose_system_prompt(persona, mode)})
 
     return problem_response(404, "not_found", f"no route for {method} {path}")
 

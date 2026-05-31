@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>Lea — you're not alone</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #2d3033;
+    --muted: #6b7280;
+    --lea: #eef3f1;
+    --lea-border: #cfe0d9;
+    --you: #e7eef6;
+    --accent: #3f7d6e;
+    --accent-ink: #ffffff;
+    --crisis: #fff4ee;
+    --crisis-border: #e3a07a;
+    --exit: #b4452f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; min-height: 100%;
+  }
+  /* Safety bar — always present, never scrolls away */
+  .safety {
+    background: #2d3033; color: #f3f4f6;
+    display: flex; align-items: center; gap: 16px;
+    padding: 8px 16px; font-size: 14px; flex-wrap: wrap;
+  }
+  .safety strong { color: #fff; }
+  .safety .sep { color: #6b7280; }
+  .exit {
+    margin-left: auto; background: var(--exit); color: #fff; border: 0;
+    border-radius: 8px; padding: 8px 14px; font-weight: 700; cursor: pointer;
+    font-size: 14px;
+  }
+  .exit:hover { filter: brightness(1.08); }
+  .exit small { display: block; font-weight: 400; opacity: .85; font-size: 11px; }
+
+  header.hero { text-align: center; padding: 28px 16px 8px; }
+  header.hero h1 { margin: 0; font-size: 30px; letter-spacing: .5px; color: var(--accent); }
+  header.hero p { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+
+  main {
+    width: 100%; max-width: 720px; margin: 0 auto; padding: 12px 16px 0;
+    flex: 1; display: flex; flex-direction: column;
+  }
+  #log { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 12px 0; }
+  .msg { max-width: 86%; padding: 12px 15px; border-radius: 16px; white-space: pre-wrap; }
+  .msg.lea { align-self: flex-start; background: var(--lea); border: 1px solid var(--lea-border); border-bottom-left-radius: 5px; }
+  .msg.you { align-self: flex-end; background: var(--you); border-bottom-right-radius: 5px; }
+  .msg.crisis { background: var(--crisis); border: 1px solid var(--crisis-border); }
+  .msg .tag { display: block; font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+  .msg.crisis .tag { color: #b45309; font-weight: 700; }
+
+  .composer { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 8px; }
+  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .modes button {
+    border: 1px solid var(--lea-border); background: var(--panel); color: var(--muted);
+    border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  .modes button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .row { display: flex; gap: 8px; }
+  #text {
+    flex: 1; resize: none; border: 1px solid var(--lea-border); border-radius: 12px;
+    padding: 12px 14px; font: inherit; background: var(--panel); color: var(--ink); min-height: 48px;
+  }
+  #text:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  #send { background: var(--accent); color: #fff; border: 0; border-radius: 12px; padding: 0 20px; font-weight: 700; cursor: pointer; }
+  #send:disabled { opacity: .5; cursor: default; }
+
+  footer { text-align: center; color: var(--muted); font-size: 12.5px; padding: 14px 16px 22px; max-width: 720px; margin: 0 auto; }
+  footer .priv { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="safety" role="region" aria-label="Safety resources">
+    <span>In immediate danger? <strong>Call 911</strong></span>
+    <span class="sep">·</span>
+    <span>DV Hotline <strong>1-800-799-7233</strong> (24/7)</span>
+    <span class="sep">·</span>
+    <span>Crisis &amp; suicide <strong>988</strong></span>
+    <button class="exit" id="exit" title="Leaves this site instantly (or press Escape twice)">
+      Quick exit ✕<small>or press Esc twice</small>
+    </button>
+  </div>
+
+  <header class="hero">
+    <h1>Lea</h1>
+    <p>You're not alone. I'm here whenever you're ready — at your own pace.</p>
+  </header>
+
+  <main>
+    <div id="log" aria-live="polite"></div>
+
+    <div class="composer">
+      <div class="modes" id="modes" aria-label="How would you like me to speak?">
+        <button data-mode="Warm" class="active">Warm</button>
+        <button data-mode="Gentle">Gentle</button>
+        <button data-mode="Direct">Direct</button>
+        <button data-mode="Strong">Strong</button>
+      </div>
+      <div class="row">
+        <textarea id="text" rows="1" placeholder="Tell me what's going on, in your own words…" autofocus></textarea>
+        <button id="send">Send</button>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Lea offers information, support, and a way to document what's happening —
+    <strong>not legal advice</strong>, and never a substitute for a 911 call in an emergency.
+    <br /><span class="priv">This is a private demo running locally on your machine. Nothing you type is stored or sent anywhere else.</span>
+  </footer>
+
+<script>
+(function () {
+  "use strict";
+  const log = document.getElementById("log");
+  const text = document.getElementById("text");
+  const send = document.getElementById("send");
+  let session = {};          // browser holds state, exactly like lea-be-core would
+  let mode = "Warm";
+
+  function bubble(role, body, crisis) {
+    const el = document.createElement("div");
+    el.className = "msg " + role + (crisis ? " crisis" : "");
+    if (role === "lea") {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = crisis ? "Lea · important" : "Lea";
+      el.appendChild(tag);
+    }
+    el.appendChild(document.createTextNode(body));
+    log.appendChild(el);
+    el.scrollIntoView({ behavior: "smooth", block: "end" });
+  }
+
+  async function say(message) {
+    bubble("you", message, false);
+    text.value = ""; autosize(); send.disabled = true;
+    try {
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message, response_mode: mode, session: session }),
+      });
+      const data = await res.json();
+      if (data.error) { bubble("lea", "Something went wrong on my end. Please try again.", false); return; }
+      session = data.session || session;
+      bubble("lea", data.response, data.tier === 3);
+    } catch (e) {
+      bubble("lea", "I couldn't reach the server. Is the demo still running?", false);
+    } finally {
+      send.disabled = false; text.focus();
+    }
+  }
+
+  function autosize() { text.style.height = "auto"; text.style.height = Math.min(text.scrollHeight, 160) + "px"; }
+  text.addEventListener("input", autosize);
+  text.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (text.value.trim()) say(text.value.trim()); }
+  });
+  send.addEventListener("click", function () { if (text.value.trim()) say(text.value.trim()); });
+
+  // Tone modes
+  document.getElementById("modes").addEventListener("click", function (e) {
+    const b = e.target.closest("button[data-mode]"); if (!b) return;
+    mode = b.dataset.mode;
+    for (const x of this.querySelectorAll("button")) x.classList.toggle("active", x === b);
+    text.focus();
+  });
+
+  // Quick exit — wipe the screen and leave, instantly. A core safety feature.
+  function quickExit() {
+    log.innerHTML = ""; session = {};
+    try { window.location.replace("https://www.weather.com/"); }
+    catch (e) { window.location.href = "https://www.weather.com/"; }
+  }
+  document.getElementById("exit").addEventListener("click", quickExit);
+  let lastEsc = 0;
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    const now = Date.now();
+    if (now - lastEsc < 600) quickExit();   // double-tap Escape
+    lastEsc = now;
+  });
+
+  bubble("lea", "Hi — I'm Lea. Whatever brought you here, you don't have to explain it all at once. " +
+                "We can go as slowly as you need. What's on your mind right now?", false);
+})();
+</script>
+</body>
+</html>

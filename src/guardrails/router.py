@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
+from guardrails.contracts import FeatureResult
 from guardrails.rules import (
     CLINICAL_TERMS,
     G01_TRIGGERS,
@@ -32,6 +33,10 @@ from guardrails.rules import (
     G17_TRIGGERS,
     G18_TRIGGERS,
     G20_TRIGGERS,
+    IMPLICIT_CRISIS_TRIGGERS,
+    NAME_REQUEST_TRIGGERS,
+    NO_DIAGNOSIS_LABELS,
+    RELATIONAL_ABUSE_PATTERNS,
     RESP,
     RISK_FACTOR_TRIGGERS,
     TACTIC_PATTERNS,
@@ -44,9 +49,9 @@ from vault.intake import VaultFeatureManager
 # BASE INTERFACE PROTOCOL FOR OOP FEATURE MANAGEMENT
 # ---------------------------------------------------------------------------
 
+
 class GuardrailFeature(Protocol):
-    def match_and_execute(self, prompt: str, session: SessionState) -> dict[str, Any] | None:
-        ...
+    def match_and_execute(self, pl: str, session: SessionState) -> FeatureResult | None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -79,28 +84,20 @@ def pair_clinical_terms(text: str) -> str:
     return text
 
 
-def _clean_prose(text: str) -> str:
-    """Collapses whitespace only. Preserves SECURITY NOTICE / ACTION NEEDED labels (G-20)."""
-    text = re.sub(r"\n+", " ", text)
-    return re.sub(r" +", " ", text).strip()
-
-
 def build_response(
     text: str,
     session: SessionState,
     tier: int = 0,
-    preserve_labels: bool = False,
     prompt: str = "",  # Capture the incoming prompt
 ) -> dict[str, Any]:
     """Central response builder. Returns a dict that's the lea-ai HTTP contract."""
     if session.expert_mode:
         text = pair_clinical_terms(text)
 
-    # Route formatting cleanly to the shared module-level Persona OOP Feature Manager
+    # Route formatting cleanly to the shared module-level Persona OOP Feature Manager.
+    # apply_mode_constraints handles whitespace normalization per response_mode, so no
+    # separate prose-cleanup pass is needed here.
     text = PERSONA_MANAGER.apply_mode_constraints(text, session, prompt)
-
-    if not preserve_labels and not session.trusted_friend_mode and getattr(session, "response_mode", "") not in ["Direct", "Gentle", "Strong", "Warm", "Crisis"]:
-        text = _clean_prose(text)
 
     return {
         "response": text,
@@ -121,17 +118,17 @@ def validate_then_educate(
     education: str,
     session: SessionState,
 ) -> tuple[str, SessionState]:
-    """G-07: always emit validation first.
+    """G-07: validation FIRST, then the substance — in the SAME turn.
 
-    Turn 1: store education in `session.pending_education`, return validation.
-    Turn 2 (if `pending_education` is set): return education and clear the slot.
+    Product directive (2026-05): a user must never have to send a follow-up
+    message just to get the answer they already asked for. We preserve the
+    validate-before-educate ORDER (validation leads), but deliver the education
+    immediately after it in one response rather than deferring it to turn 2.
+
+    `pending_education` is cleared (and no longer set) so nothing carries over.
     """
-    if session.pending_education is None:
-        session.pending_education = education
-        return validation, session
-    result = session.pending_education
     session.pending_education = None
-    return result, session
+    return f"{validation} {education}", session
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +143,11 @@ def matches_any(prompt: str, patterns: list[str]) -> bool:
     test/dev time rather than getting silent substring-match semantics.
     """
     return any(re.search(pat, prompt, re.IGNORECASE) for pat in patterns)
-    
-    
+
+
 def contains_quoted_speech(prompt: str) -> bool:
     """G-08: detect verbatim disclosures — quoted speech in prompt."""
-    return bool(
-        re.search(r'["“”指標‘’].{3,100}["“”指標‘’]', prompt)
-    )
+    return bool(re.search(r'["“”‘’].{3,100}["“”‘’]', prompt))
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +203,58 @@ def detect_tactics(prompt: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# RELATIONAL-ABUSE NAMING — G-13b
+# ---------------------------------------------------------------------------
+
+
+def name_relational_abuse(prompt: str) -> list[str]:
+    """G-13b: return canonical labels for any relational-abuse pattern described.
+
+    Order follows `RELATIONAL_ABUSE_PATTERNS` (dict insertion order) so the
+    composed naming response is deterministic. Empty list when nothing matches.
+    """
+    return [
+        label
+        for label, (pattern, _clause) in RELATIONAL_ABUSE_PATTERNS.items()
+        if re.search(pattern, prompt, re.IGNORECASE)
+    ]
+
+
+def _join_clauses(clauses: list[str]) -> str:
+    """Join naming clauses into natural prose: 'a', 'a and b', 'a, b, and c'."""
+    if len(clauses) == 1:
+        return clauses[0]
+    if len(clauses) == 2:
+        return f"{clauses[0]} and {clauses[1]}"
+    return ", ".join(clauses[:-1]) + f", and {clauses[-1]}"
+
+
+def compose_naming_response(labels: list[str]) -> str:
+    """G-13b: name the pattern(s), validate, refuse to diagnose where relevant.
+
+    Structure is ordered so the no-diagnosis disclaimer lands BEFORE the closing
+    check-in — it must survive any downstream sentence-cap in `apply_mode_constraints`.
+    """
+    joined = _join_clauses([RELATIONAL_ABUSE_PATTERNS[label][1] for label in labels])
+    parts = [
+        "I want to name what I'm hearing, because putting language to it can help you "
+        "trust your own read on it.",
+        f"What you're describing sounds like {joined}.",
+    ]
+    if any(label in NO_DIAGNOSIS_LABELS for label in labels):
+        parts.append(
+            "I'm naming behaviors and traits here, not giving a diagnosis — I can't and "
+            "won't label anyone with a personality disorder from a description."
+        )
+    parts.append(
+        "That's a real pattern, and your discomfort with it makes sense — "
+        "you're not overthinking it."
+    )
+    parts.append("How are you holding up as you tell me this?")
+    return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # MAIN ROUTER
 # ---------------------------------------------------------------------------
 
@@ -232,19 +279,28 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         if "strangulation" not in session.risk_factors:
             session.risk_factors.append("strangulation")
         session.tier3_fired_this_session = True
-        return build_response(RESP["G04"], session, tier=3, preserve_labels=True, prompt=user_prompt)
+        return build_response(RESP["G04"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G01_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(RESP["G01"], session, tier=3, preserve_labels=True, prompt=user_prompt)
+        return build_response(RESP["G01"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G02_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(RESP["G02"], session, tier=3, preserve_labels=True, prompt=user_prompt)
+        return build_response(RESP["G02"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G03_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(RESP["G03_ack"], session, tier=3, preserve_labels=True, prompt=user_prompt)
+        return build_response(RESP["G03_ack"], session, tier=3, prompt=user_prompt)
+
+    # Implicit-crisis safety net — default-to-safe per CLAUDE.md. Catches harm
+    # language that no explicit G-01..G-04 pattern matched. Runs AFTER the
+    # explicit checks so those keep their specific (medical/suicide/child) copy.
+    # Uses word-boundary regex (see IMPLICIT_CRISIS_TRIGGERS) rather than substring
+    # matching, which over-fired on benign messages like "I blocked his number".
+    if matches_any(pl, IMPLICIT_CRISIS_TRIGGERS):
+        session.tier3_fired_this_session = True
+        return build_response(RESP["G01"], session, tier=3, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # BRIGHT-LINE REFUSALS — out-of-scope
@@ -257,6 +313,14 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             r"will the judge (grant|give|order)",
             r"strong case",
             r"(win|lose) (my )?case",
+            # Real survivors ask about the outcome, not "my case": custody, the order,
+            # the house, their chances. Lea must meet these with honest "I can't predict,
+            # but here's what helps" — not a generic non-answer (found via safety eval).
+            r"will i (win|lose|keep|get to keep)\b",
+            r"(win|lose|keep) (custody|the kids|my kids|the house|the case)",
+            r"what are my (chances|odds)",
+            r"do i have a (good |strong )?(case|chance)",
+            r"(good|strong|decent) chance",
         ],
     ):
         return build_response(RESP["G_predict_block"], session, tier=0, prompt=user_prompt)
@@ -277,23 +341,21 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
     # POLYMORPHIC DECOUPLED DISPATCH LOOP (Anti-Superfile Architecture)
     # -----------------------------------------------------------------------
     for feature in FEATURE_REGISTRY:
-        execution_result = feature.match_and_execute(pl, session)
-        if execution_result is not None:
-            if isinstance(execution_result, tuple) and len(execution_result) == 3:
-                txt, tr, pres = execution_result
-                return build_response(txt, session, tier=tr, preserve_labels=pres, prompt=user_prompt)
-            if isinstance(execution_result, tuple) and len(execution_result) == 2:
-                txt, tr = execution_result
-                return build_response(txt, session, tier=tr, prompt=user_prompt)
+        result = feature.match_and_execute(pl, session)
+        if result is not None:
+            return build_response(
+                result.text,
+                session,
+                tier=result.tier,
+                prompt=user_prompt,
+            )
 
     # -----------------------------------------------------------------------
     # G-20 device security — physical stalking append-on if both present
     # -----------------------------------------------------------------------
     if matches_any(pl, G20_TRIGGERS):
         response = RESP["G20_security"]
-        if matches_any(
-            pl, [r"(keeps? )?(showing up|appearing|following me|outside my)"]
-        ):
+        if matches_any(pl, [r"(keeps? )?(showing up|appearing|following me|outside my)"]):
             response += (
                 " Separately — the pattern of him physically showing up where you are is a "
                 "serious escalation that goes beyond the phone. This level of physical tracking "
@@ -301,7 +363,7 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
                 "pattern for a court filing, and connect you with emergency options. "
                 "Want me to find one in your county?"
             )
-        return build_response(response, session, tier=2, preserve_labels=True, prompt=user_prompt)
+        return build_response(response, session, tier=2, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # G-16 / G-17 / G-18 — hard blocks
@@ -397,6 +459,17 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         )
         return build_response(report, session, tier=0, prompt=user_prompt)
 
+    # -----------------------------------------------------------------------
+    # G-13b relational-abuse naming — name the pattern, especially when asked.
+    # Sits at the END of the cascade: every Tier-3 crisis and hard block above
+    # has already taken precedence. Tier 0; never overrides safety routing.
+    # -----------------------------------------------------------------------
+    labels = name_relational_abuse(pl)
+    if labels:
+        return build_response(compose_naming_response(labels), session, tier=0, prompt=user_prompt)
+    if matches_any(pl, NAME_REQUEST_TRIGGERS):
+        return build_response(RESP["G_name_invite"], session, tier=0, prompt=user_prompt)
+
     return build_response(RESP["G_default"], session, tier=0, prompt=user_prompt)
 
 
@@ -404,9 +477,10 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
 # BACKWARD COMPATIBILITY STUBS FOR REGRESSION TESTS
 # ---------------------------------------------------------------------------
 
+
 def enforce_trusted_friend_mode(text: str, session: SessionState | None = None) -> str:
     """Legacy test wrapper routing calls seamlessly to the Persona OOP manager.
-    
+
     Pins compatibility for test_guardrails.py without cluttering router logic.
     """
     # 1. Strip raw bullet and list markers cleanly from the input string
@@ -414,10 +488,17 @@ def enforce_trusted_friend_mode(text: str, session: SessionState | None = None) 
     text = re.sub(r"^[ \t]*\d+\.[ \t]*", "", text, flags=re.MULTILINE)
     text = re.sub(r"\s+[-•*]\s+", " ", text)
     text = re.sub(r"\s+\d+\.\s+", " ", text)
-    
+
     # 2. Normalize whitespace
     text = re.sub(r"\s+", " ", text).strip()
-    
+
     # 3. Capitalize and isolate individual sentences precisely
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    return " ".join(sentences[:5]) if len(sentences) > 5 else " ".join(sentences)
+    text = " ".join(sentences[:5]) if len(sentences) > 5 else " ".join(sentences)
+
+    # 4. Cap at one question per turn (mirrors apply_mode_constraints)
+    question_count = text.count("?")
+    if question_count > 1:
+        parts = text.rsplit("?", question_count - 1)
+        text = parts[0] + "?" + parts[-1].replace("?", ".")
+    return text

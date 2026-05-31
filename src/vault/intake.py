@@ -15,9 +15,11 @@ Stateless contract:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
+from guardrails.contracts import FeatureResult
 from guardrails.rules import RESP
 from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
@@ -27,29 +29,125 @@ SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL"}
 # Jurisdictions that must be forced to halt and handoff after collecting Tier 1
 HANDOFF_JURISDICTIONS = {"IL"}
 
+# Tier-2 jurisdiction sets, transcribed verbatim from the DVRO Multi-State Intake
+# Question Flow doc. These hold the FULL doc lists (not just the currently-supported
+# states) so the gates stay in sync with the source of truth; the validation layer
+# only admits SUPPORTED_JURISDICTIONS today, so unlisted states never reach this logic.
+# Effective set today = doc list ∩ SUPPORTED_JURISDICTIONS.
+MINOR_FILING_STATES = frozenset(
+    {
+        "AL",
+        "AR",
+        "CA",
+        "GA",
+        "HI",
+        "IA",
+        "ME",
+        "MA",
+        "MN",
+        "MO",
+        "NE",
+        "OK",
+        "OR",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+    }
+)  # Q24 — CA, TX among supported (NOT NY/FL)
+PHYSICAL_DESCRIPTION_STATES = frozenset(
+    {
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "FL",
+        "GA",
+        "ID",
+        "KY",
+        "LA",
+        "ME",
+        "MA",
+        "MN",
+        "MS",
+        "MO",
+        "NE",
+        "NH",
+        "ND",
+        "OH",
+        "OK",
+        "PA",
+        "SC",
+        "TN",
+        "UT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+    }
+)  # Q31-35 — CA, FL among supported (NOT NY/TX)
+VEHICLE_DESCRIPTION_STATES = frozenset(
+    {
+        "AR",
+        "CA",
+        "CT",
+        "FL",
+        "GA",
+        "ID",
+        "KY",
+        "LA",
+        "ME",
+        "MA",
+        "MS",
+        "MO",
+        "NE",
+        "NH",
+        "ND",
+        "OH",
+        "OK",
+        "SC",
+        "TN",
+        "UT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+    }
+)  # Q41-43 — CA, FL among supported (NOT NY/TX)
+
 # TIER 1: UNIVERSAL CORE DEFINITIONS (Q1 - Q22)
 # ---------------------------------------------------------------------------
 TIER_1_FLOW = [
     {
         "field": "petitioner.legal_name",
-        "prompt": "What name should I use for the court? Your full legal name.",
+        "prompt": (
+            "What's the name you'd use on a driver's license or a passport? "
+            "That's the one the court needs."
+        ),
         "schema": {"type": "string", "minLength": 1, "maxLength": 200},
     },
     {
         "field": "petitioner.dob",
-        "prompt": "When were you born?",
+        "prompt": "When's your birthday?",
         "schema": {"type": "string", "format": "date"},
     },
     {
         "field": "petitioner.safe_mailing_address",
         "prompt": (
-            "Where can the court send mail safely? A PO box or a friend's address is fine."
+            "The court needs an address to send you things. It doesn't have to be where you "
+            "live — a PO box, a friend's place, an advocate's office all work. "
+            "Where should they send it?"
         ),
         "schema": {"type": "string", "minLength": 1},
     },
     {
         "field": "petitioner.safe_phone",
-        "prompt": "A safe number to reach you?",
+        "prompt": (
+            "Is there a phone number that's safe for the court to use? "
+            "Skip this if you'd rather not — it's not required."
+        ),
         "schema": {"type": "string", "minLength": 1},
     },
     {
@@ -59,22 +157,28 @@ TIER_1_FLOW = [
     },
     {
         "field": "respondent.legal_name",
-        "prompt": "What's his/her/their full name?",
+        "prompt": "What's their full name?",
         "schema": {"type": "string", "minLength": 1},
     },
     {
         "field": "respondent.last_known_address",
-        "prompt": "Where do they live, if you know?",
+        "prompt": (
+            "Where do they live, if you know? Don't know is a real answer — "
+            "sometimes that's part of the problem."
+        ),
         "schema": {"type": "string"},
     },
     {
         "field": "relationship.type",
-        "prompt": "How do you know each other?",
+        "prompt": (
+            "How would you describe what they are to you — "
+            "partner, ex, family, someone you live with?"
+        ),
         "schema": {"type": "string"},
     },
     {
         "field": "relationship.live_together_now",
-        "prompt": "Do you live with them right now?",
+        "prompt": "Are you living with them right now?",
         "schema": {"type": "boolean"},
     },
     {
@@ -84,42 +188,48 @@ TIER_1_FLOW = [
     },
     {
         "field": "relationship.children_in_common",
-        "prompt": "Do you have a child together?",
+        "prompt": "Do the two of you have a child together?",
         "schema": {"type": "boolean"},
     },
     {
         "field": "incidents[].date",
-        "prompt": "When did this happen? An estimate is okay.",
+        "prompt": (
+            "Do you remember roughly when this was? "
+            "Last week, last year, a season — anything you've got."
+        ),
         "schema": {"type": "string"},
     },
     {
         "field": "incidents[].location",
-        "prompt": "Where were you?",
+        "prompt": "Where were you when it happened?",
         "schema": {"type": "string"},
     },
     {
         "field": "incidents[].narrative",
-        "prompt": "In your own words, what happened?",
+        "prompt": (
+            "Whenever you're ready — tell me what happened, in your own words. "
+            "I won't change them. You can pause anytime."
+        ),
         "schema": {"type": "string", "minLength": 1, "maxLength": 10000},
     },
     {
         "field": "incidents[].witnesses_present",
-        "prompt": "Was anyone else there?",
+        "prompt": "Was anyone else around — even someone who didn't see the whole thing?",
         "schema": {"type": "string"},
     },
     {
         "field": "incidents[].police_called",
-        "prompt": "Did anyone call the police?",
+        "prompt": "Did anyone end up calling the police — you, them, a neighbor?",
         "schema": {"type": "boolean"},
     },
     {
         "field": "incidents[].weapon_involved",
-        "prompt": "Was there a weapon?",
+        "prompt": "Was there a weapon involved — a gun, a knife, or something else used as one?",
         "schema": {"type": "boolean"},
     },
     {
         "field": "incidents[].injury",
-        "prompt": "Were you or anyone hurt?",
+        "prompt": "Was anyone hurt — physically, or in a way that took longer to feel?",
         "schema": {"type": "string"},
     },
     {
@@ -129,19 +239,25 @@ TIER_1_FLOW = [
     },
     {
         "field": "protected_persons.children[]",
-        "prompt": "Are there kids you want kept safe?",
+        "prompt": (
+            "If it's okay, I want to ask about the kids next. I'll keep it short — "
+            "these questions are for the court, not for me, and we can skip any of them."
+        ),
         "schema": {"type": "string"},
     },
     {
         "field": "firearm.respondent_has_access",
-        "prompt": "Does he/she/they have a gun, or access to one?",
+        "prompt": (
+            "Do they have a gun, or could they get to one — at home, at work, a relative's place? "
+            "'Don't know' is a real answer."
+        ),
         "schema": {"type": "boolean"},
     },
     {
         "field": "prior_orders.exists",
         "prompt": (
-            "Have you ever had a restraining order before — "
-            "against them, or them against you?"
+            "Has there ever been any kind of restraining order between the two of you — "
+            "either direction, any state?"
         ),
         "schema": {"type": "boolean"},
     },
@@ -149,41 +265,38 @@ TIER_1_FLOW = [
 
 
 def _is_minor(dob_str: str) -> bool:
-    """Helper to detect minor status for Q24 pathing based on 2026 anchor date."""
+    """Helper to detect minor status for Q24 pathing, relative to today's date."""
     try:
         dob = datetime.strptime(dob_str, "%Y-%m-%d")
-        age = 2026 - dob.year - ((dob.month, dob.day) > (5, 27))
-        return age < 18
     except ValueError:
         return False
+    today = datetime.now()
+    age = today.year - dob.year - ((dob.month, dob.day) > (today.month, today.day))
+    return age < 18
 
 
 class VaultFeatureManager:
     """OOP interface encapsulation managing state tracking and legal workflows."""
 
-    def match_and_execute(
-        self, pl: str, session: SessionState
-    ) -> tuple[str, int, bool] | tuple[str, int] | None:
+    def match_and_execute(self, pl: str, session: SessionState) -> FeatureResult | None:
+        # Regex (not substring) so natural phrasings match, e.g.
+        # "how do i apply for a restraining order".
         if any(
-            w in pl
-            for w in [
-                "how do i get a restraining order",
-                "how to file a restraining order",
-                "how to apply for a restraining order",
-                "how to obtain a restraining order",
-                "tell me how to file a restraining order",
-                "walk me how to file a restraining order",
-                "how to protective order",
-            ]
+            re.search(p, pl)
+            for p in (
+                r"how (do i|to|can i|can you|would i|should i|do you)\b.{0,25}"
+                r"(get|file|apply|obtain|start|request|fill).{0,25}(restraining|protective)",
+                r"(walk|tell) me.{0,20}(get|file|apply|obtain).{0,25}(restraining|protective)",
+            )
         ):
             if session.user_state != "California":
-                return (
-                    "DVRO procedure differs significantly across the 50 US jurisdictions. "
+                return FeatureResult(
+                    "DVRO procedure differs significantly across the 47 US jurisdictions. "
                     "Tell me what state you're filing in and I'll walk you through the "
                     "exact procedure — form names, fees, hearing timeline.",
                     0,
                 )
-            return (
+            return FeatureResult(
                 "In California, here is how to file for a domestic violence restraining order. "
                 "Step 1: Go to your local courthouse and ask for the DV petition forms — "
                 "in California that's the DV-100. Step 2: Fill out the forms describing the "
@@ -196,7 +309,7 @@ class VaultFeatureManager:
             )
 
         if ("protective order" in pl or "restraining order" in pl) and "violat" in pl:
-            return (
+            return FeatureResult(
                 "A violation of a protective order is an active criminal offense. "
                 "Call 911 — not a non-emergency line — and tell the dispatcher you have a "
                 "restraining order that is being violated. The officer who responds is "
@@ -208,7 +321,7 @@ class VaultFeatureManager:
             )
 
         if any(w in pl for w in ["showing up", "appearing", "following me", "outside my"]):
-            return (
+            return FeatureResult(
                 "This pattern — tracking your location and showing up — is a serious escalation "
                 "in risk. For safe planning, use an unmonitored device (library computer or a "
                 "trusted friend's phone). A local advocate can help you map out safe routes, "
@@ -225,7 +338,7 @@ class VaultFeatureManager:
                 session.risk_factors.append("weapon_access")
             if not session.resource_surfaced_this_session:
                 session.resource_surfaced_this_session = True
-                return (
+                return FeatureResult(
                     "Some of what you've shared — firearm access combined with threats — carries "
                     "elevated risk. I want to make sure you have a safety plan and an advocate's "
                     "number on hand, just to have. No pressure to use them. The National DV "
@@ -237,7 +350,7 @@ class VaultFeatureManager:
 
         if any(w in pl for w in ["deport", "undocumented", "visa", "immigration status"]):
             session.immigration_risk = True
-            return (
+            return FeatureResult(
                 "Threats involving immigration status are a form of coercive control. Under "
                 "federal law — the Violence Against Women Act — independent options exist to "
                 "secure immigration status without the abuser's knowledge or cooperation, "
@@ -278,13 +391,12 @@ class VaultFeatureManager:
                     "find the nearest available bed in your county right now. You do not need "
                     "money, ID, or a reservation to enter."
                 )
-            return response, 2
+            return FeatureResult(response, 2)
 
         if any(
-            w in pl
-            for w in ["lose custody", "take the kids", "take custody", "custody threat"]
+            w in pl for w in ["lose custody", "take the kids", "take custody", "custody threat"]
         ):
-            return (
+            return FeatureResult(
                 "Threatening to take the children is a well-documented tactic of coercive control "
                 "— designed to create fear and prevent you from seeking help. A family law "
                 "advocate can walk you through how parental rights are handled in your county and "
@@ -295,13 +407,13 @@ class VaultFeatureManager:
 
         if "after i file" in pl or "after filing" in pl or "happens after i file" in pl:
             if session.user_state != "California":
-                return (
-                    "DVRO procedure differs significantly across the 50 US jurisdictions. "
+                return FeatureResult(
+                    "DVRO procedure differs significantly across the 47 US jurisdictions. "
                     "Tell me what state you're filing in and I'll walk you through the "
                     "exact procedure — form names, fees, hearing timeline.",
                     0,
                 )
-            return (
+            return FeatureResult(
                 "In California, filing initiates a strict sequence. Within a few hours: a judge "
                 "reviews your request for a Temporary Restraining Order. If granted, you receive a "
                 "stamped copy from the clerk — enforceable immediately. The sheriff serves the "
@@ -312,14 +424,13 @@ class VaultFeatureManager:
                 "request a remote appearance. If the respondent doesn't show, the judge usually "
                 "grants the order anyway. Want me to walk through what to bring to the hearing?",
                 0,
-                True,
             )
 
         if any(
             w in pl
             for w in ["recipe app", "look like", "disguise", "private mode", "clear history"]
         ):
-            return RESP["G20_security"], 2, True
+            return FeatureResult(RESP["G20_security"], 2)
 
         return None
 
@@ -372,14 +483,15 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
 
     if (
         _is_minor(answers.get("petitioner.dob", ""))
-        and jurisdiction in {"CA", "NY", "TX", "FL"}
+        and jurisdiction in MINOR_FILING_STATES
         and "petitioner.minor_filing_path" not in answers
     ):
         return {
             "step": "petitioner.minor_filing_path",
             "prompt": (
-                "You're under 18 — is there an adult who can file with you, "
-                "or do you want to file alone?"
+                "Looks like you're under 18 — most states want an adult to file alongside "
+                "someone your age. Is there a parent, a guardian, or another trusted adult who "
+                "could? If not, there's still a way forward, and we can figure it out."
             ),
             "schema": {"type": "string"},
         }
@@ -388,8 +500,8 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         return {
             "step": "petitioner.race",
             "prompt": (
-                "What is your race? This is a required court demographic field, "
-                "but you can skip if uncomfortable."
+                "Some states ask about race or ethnicity on the form itself — yours does. "
+                "You can write what fits, or skip. Lea defaults to 'not disclosed.'"
             ),
             "schema": {"type": "string"},
         }
@@ -397,7 +509,10 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     if jurisdiction in {"CA", "FL"} and "petitioner.gender" not in answers:
         return {
             "step": "petitioner.gender",
-            "prompt": "How do you describe your gender? You can skip.",
+            "prompt": (
+                "Your state has a gender field on the form. "
+                "How would you describe yours — or want to skip it?"
+            ),
             "schema": {"type": "string"},
         }
 
@@ -407,14 +522,14 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     ):
         return {
             "step": "petitioner.interpreter_language",
-            "prompt": "Do you need an interpreter for court? Which language?",
+            "prompt": (
+                "If you go to a hearing, would you want an interpreter there? "
+                "If yes — what language?"
+            ),
             "schema": {"type": "string"},
         }
 
-    if (
-        jurisdiction in {"CA", "FL"}
-        and "petitioner.disability_accommodation" not in answers
-    ):
+    if jurisdiction in {"CA", "FL"} and "petitioner.disability_accommodation" not in answers:
         return {
             "step": "petitioner.disability_accommodation",
             "prompt": (
@@ -424,23 +539,25 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
             "schema": {"type": "string"},
         }
 
-    if jurisdiction in {"CA", "NY", "TX", "FL"}:
-        prefix = (
-            "The sheriff uses this to find them when they deliver the papers. "
-            "Estimates are fine. "
-        )
+    if jurisdiction in PHYSICAL_DESCRIPTION_STATES:
+        # Frame the cluster's purpose ONCE, on the first question the user sees (height),
+        # then keep the rest short — repeating the sheriff preamble on every field reads as
+        # interrogation. See the Tone doc's frame-purpose rule.
         physical_fields = [
             (
                 "respondent.height",
-                prefix + "About how tall? An estimate is fine.",
+                "These next few — height, weight, what they look like — feel personal, I know. "
+                "They're for the sheriff who delivers the papers, not for me, and estimates are "
+                "fine. About how tall?",
                 {"type": "string"},
             ),
-            ("respondent.weight", prefix + "About what weight?", {"type": "string"}),
-            ("respondent.eye_color", prefix + "Eye color?", {"type": "string"}),
-            ("respondent.hair_color", prefix + "Hair color?", {"type": "string"}),
+            ("respondent.weight", "About what they weigh?", {"type": "string"}),
+            ("respondent.eye_color", "Eye color?", {"type": "string"}),
+            ("respondent.hair_color", "Hair color?", {"type": "string"}),
             (
                 "respondent.distinguishing_marks",
-                prefix + "Any tattoos, scars, or other marks the sheriff?",
+                "Tattoos, scars, anything that stands out — "
+                "anything the sheriff might use to recognize them?",
                 {"type": "string"},
             ),
         ]
@@ -451,7 +568,10 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     if "respondent.employer_name" not in answers:
         return {
             "step": "respondent.employer_name",
-            "prompt": "Where do they work, if you know?",
+            "prompt": (
+                "Where do they work? The court sometimes uses a job address to deliver "
+                "papers if home doesn't work."
+            ),
             "schema": {"type": "string"},
         }
     if "respondent.employer_address" not in answers:
@@ -467,7 +587,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
             "schema": {"type": "string"},
         }
 
-    if jurisdiction in {"CA", "NY", "TX", "FL"}:
+    if jurisdiction in VEHICLE_DESCRIPTION_STATES:
         if "respondent.vehicle_make_model" not in answers:
             return {
                 "step": "respondent.vehicle_make_model",
@@ -490,13 +610,19 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     if jurisdiction in {"FL", "NY", "TX"} and "respondent.is_law_enforcement" not in answers:
         return {
             "step": "respondent.is_law_enforcement",
-            "prompt": "Are they a police officer, military, or do they carry a gun for work?",
+            "prompt": (
+                "Is their job one where they carry a firearm — police, military, security? "
+                "It changes how some of the orders work."
+            ),
             "schema": {"type": "boolean"},
         }
     if jurisdiction == "FL" and "respondent.is_active_military" not in answers:
         return {
             "step": "respondent.is_active_military",
-            "prompt": "Are they currently in the military, active duty?",
+            "prompt": (
+                "Are they on active military duty right now? If yes, there's a federal law "
+                "that gives them extra time to respond, and we should plan for it."
+            ),
             "schema": {"type": "boolean"},
         }
     if jurisdiction == "CA" and "respondent.immigration_status_known" not in answers:
@@ -550,13 +676,19 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         if "firearm.types[]" not in answers:
             return {
                 "step": "firearm.types[]",
-                "prompt": "Do you know what kind? A handgun, a rifle?",
+                "prompt": (
+                    "Do you know what kind? A handgun, a long gun, more than one? "
+                    "Whatever you can describe is useful."
+                ),
                 "schema": {"type": "array", "items": {"type": "string"}},
             }
         if "firearm.locations[]" not in answers:
             return {
                 "step": "firearm.locations[]",
-                "prompt": "Where are they kept, if you know?",
+                "prompt": (
+                    "Any idea where they're kept? Doesn't have to be exact — "
+                    "'in the truck,' 'somewhere in the bedroom,' 'his mom's house' all help."
+                ),
                 "schema": {"type": "array", "items": {"type": "string"}},
             }
 
@@ -569,8 +701,9 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         return {
             "step": "petitioner.ssn",
             "prompt": (
-                "(For child or spousal support, the court needs your SSN. "
-                "Encrypted, never shared.)"
+                "Because you're asking the judge for support, the court needs your Social "
+                "Security number. It's encrypted on our end — only used when the petition "
+                "gets generated, and never shared anywhere else."
             ),
             "schema": {"type": "string", "pattern": r"^\d{3}-\d{2}-\d{4}$"},
         }

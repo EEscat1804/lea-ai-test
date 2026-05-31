@@ -18,6 +18,8 @@ ignore = ["S101"]
 # typography (curly quotes, em-dashes, multiplication sign). Don't flag those.
 "src/guardrails/rules.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/guardrails/router.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+# Dev harnesses (not shipped): intentional CLI/UI glyphs like the "›" prompt arrow.
+"tools/*" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.12"
