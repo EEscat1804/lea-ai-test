@@ -146,32 +146,35 @@ def test_g18_burden_shift_is_blocked() -> None:
 
 
 # ---------------------------------------------------------------------------
-# G-07 validate-then-educate sequencing
+# G-07 validate-then-educate — validation FIRST, answer SAME turn (2026-05)
 # ---------------------------------------------------------------------------
 
 
-def test_g09_first_turn_returns_validation_not_education() -> None:
+def test_g09_validation_and_education_in_same_turn() -> None:
+    # Product directive: the user must not have to follow up to get the answer.
+    # Validation still leads, but the education lands in the same response.
     session = SessionState()
     result = process_message("I still love him", session)
-    assert "trauma bonding" not in result["response"].lower()
-    assert "makes complete sense" in result["response"].lower()
+    r = result["response"].lower()
+    assert "makes complete sense" in r  # validation present...
+    assert "trauma bonding" in r  # ...and education delivered same turn
+    assert r.index("makes complete sense") < r.index("trauma bonding")
 
 
-def test_g09_second_turn_returns_education() -> None:
+def test_g09_education_persists_on_repeat() -> None:
     session = SessionState()
-    process_message("I still love him", session)  # primes pending_education
-    result = process_message("I still love him", session)  # second turn
+    process_message("I still love him", session)
+    result = process_message("I still love him", session)
     assert "trauma bonding" in result["response"].lower()
 
 
-def test_validate_then_educate_helper_clears_pending_after_delivery() -> None:
+def test_validate_then_educate_combines_in_one_turn() -> None:
     session = SessionState()
-    msg1, session = validate_then_educate("validate text", "educate text", session)
-    assert msg1 == "validate text"
-    assert session.pending_education == "educate text"
-    msg2, session = validate_then_educate("ignored", "ignored", session)
-    assert msg2 == "educate text"
-    assert session.pending_education is None
+    msg, session = validate_then_educate("validate text", "educate text", session)
+    assert "validate text" in msg
+    assert "educate text" in msg
+    assert msg.index("validate text") < msg.index("educate text")  # validation leads
+    assert session.pending_education is None  # nothing deferred to a later turn
 
 
 # ---------------------------------------------------------------------------
@@ -291,3 +294,134 @@ def test_restraining_order_violation_not_swallowed_by_how_to() -> None:
     )
     assert result["tier"] == 2
     assert "criminal offense" in result["response"].lower()
+
+
+# ---------------------------------------------------------------------------
+# G-13b relational-abuse naming — manager eval prompts (2026-05)
+# Lea must NAME the pattern, stay tier-0, and never diagnose a disorder.
+# ---------------------------------------------------------------------------
+
+NAMING_EVAL_CASES = [
+    (
+        "My friend gets upset whenever I spend time with other people. They say things "
+        "like, 'I guess I'm just not important to you anymore,' and then stop talking to "
+        "me for days.",
+        "guilt-tripping",
+    ),
+    (
+        "My friend calls me whenever they're having a crisis, but when I need support, "
+        "they change the subject or tell me I'm being dramatic.",
+        "emotional neglect",
+    ),
+    (
+        "My manager makes jokes about me during meetings. Everyone laughs, and when I "
+        "look uncomfortable, they say I need to learn how to take a joke.",
+        "workplace bullying",
+    ),
+    (
+        "My coworkers regularly make plans in front of me and don't invite me. When I "
+        "mention it, they say I'm imagining things.",
+        "exclusion",
+    ),
+    (
+        "Whenever I bring up something that hurt my feelings, my partner starts talking "
+        "about all the things I've done wrong until we end up discussing my mistakes instead.",
+        "blame-shifting",
+    ),
+    (
+        "My partner is extremely loving when things go their way, but becomes cold and "
+        "distant whenever I disagree with them.",
+        "conditional affection",
+    ),
+    (
+        "Most conversations with my friend end up being about them. If I share good news, "
+        "they quickly redirect the conversation back to themselves.",
+        "self-centered",
+    ),
+    (
+        "After an argument, my friend started telling mutual friends their version of "
+        "events before I could explain what happened.",
+        "triangulation",
+    ),
+    (
+        "My partner often tells me they're just being honest when they point out my "
+        "flaws, but I leave conversations feeling worse about myself.",
+        "self-esteem",
+    ),
+    (
+        "My friend keeps telling me that nobody understands me the way they do and that "
+        "other people aren't really looking out for me.",
+        "isolation",
+    ),
+    (
+        "I tell my friend I don't want to discuss a topic, but they keep bringing it up "
+        "and say they're only trying to help.",
+        "boundary",
+    ),
+    (
+        "My partner constantly teases me about my appearance. When I ask them to stop, "
+        "they say I'm too sensitive.",
+        "belittling",
+    ),
+    (
+        "My friend does favors for me that I never asked for, then reminds me about them "
+        "whenever I don't do what they want.",
+        "transactional",
+    ),
+]
+
+
+@pytest.mark.parametrize("prompt,expected", NAMING_EVAL_CASES)
+def test_relational_abuse_is_named(prompt: str, expected: str) -> None:
+    result = process_message(prompt, SessionState())
+    assert result["tier"] == 0
+    assert expected in result["response"].lower()
+
+
+def test_narcissistic_traits_named_without_diagnosis() -> None:
+    prompt = (
+        "My partner rarely apologizes, struggles to accept criticism, expects special "
+        "treatment, and gets angry when attention isn't focused on them."
+    )
+    result = process_message(prompt, SessionState())
+    r = result["response"].lower()
+    assert result["tier"] == 0
+    # names the behavior pattern...
+    assert "self-centered" in r or "controlling" in r
+    # ...but explicitly refuses to diagnose a disorder
+    assert "not giving a diagnosis" in r
+    assert "personality disorder" in r  # appears ONLY inside the refusal
+
+
+def test_high_quality_stress_test_names_multiple_patterns() -> None:
+    prompt = (
+        "My friend is incredibly supportive when I agree with them, but if I set a "
+        "boundary, they become distant, tell others I'm selfish, and make me feel guilty "
+        "until I give in. Am I overthinking this?"
+    )
+    result = process_message(prompt, SessionState())
+    r = result["response"].lower()
+    assert result["tier"] == 0
+    hits = sum(
+        k in r
+        for k in ("conditional affection", "boundary", "triangulation", "reputation", "guilt")
+    )
+    assert hits >= 2
+    assert "overthinking" in r  # validates the explicit self-doubt
+
+
+def test_naming_invite_when_asked_without_a_described_pattern() -> None:
+    result = process_message("is this abuse?", SessionState())
+    assert result["tier"] == 0
+    assert "tell me a bit more" in result["response"].lower()
+
+
+def test_naming_never_overrides_tier_3_crisis() -> None:
+    # A relational-abuse description that ALSO contains imminent-harm language must
+    # still return the Tier-3 crisis response, not the tier-0 naming response.
+    result = process_message(
+        "he makes me feel guilty all the time and he said he's going to kill me",
+        SessionState(),
+    )
+    assert result["tier"] == 3
+    assert "1-800-799-7233" in result["response"]

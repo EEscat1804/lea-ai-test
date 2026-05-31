@@ -102,6 +102,125 @@ TACTIC_PATTERNS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# G-13b RELATIONAL-ABUSE NAMING — name the pattern, esp. when asked
+#
+# Product directive (2026-05): Lea should be able to *name* manipulation and
+# abuse when a user describes it — and across relationships beyond an intimate
+# partner (friends, family, coworkers, managers). Each entry maps a canonical
+# label to (trigger regex, plain-language naming clause). The router joins the
+# matched clauses into a single naming response.
+#
+# SCOPE NOTE: this deliberately reaches past the DVRO/IPV core domain into
+# friendship/workplace/social dynamics, per product direction. Naming is always
+# tier-0 and sits at the END of the cascade — it never overrides a Tier-3 crisis
+# or any hard block above it.
+#
+# NO DIAGNOSIS: the self-centered / narcissistic-traits entries (see
+# NO_DIAGNOSIS_LABELS) name observable BEHAVIORS only. The router appends an
+# explicit refusal-to-diagnose disclaimer whenever one of them matches — we never
+# label anyone with a personality disorder from a description.
+#
+# Apostrophes are written as `.` (any-char) to match the existing trigger style
+# in this module (e.g. `couldn.t breathe`).
+# ---------------------------------------------------------------------------
+
+RELATIONAL_ABUSE_PATTERNS: dict[str, tuple[str, str]] = {
+    "guilt-tripping": (
+        r"(gets? upset whenever|i guess i.m just not important|guilt.?trip|"
+        r"make(s)? me feel guilty|stop(s|ped)? (talking|speaking) to me for (days|a while)|"
+        r"silent treatment)",
+        "guilt-tripping and emotional pressure",
+    ),
+    "emotional-neglect": (
+        r"(when i need (support|them|you).{0,25}(change|dismiss|dramatic|subject)|"
+        r"being dramatic|change(s)? the subject|only (calls|reaches out|there) when (they|he|she)|"
+        r"never (there|available) when i)",
+        "a one-sided dynamic where your needs get dismissed — a form of emotional neglect",
+    ),
+    "workplace-bullying": (
+        r"((manager|boss|supervisor|coworkers?).{0,40}(jokes? about me|laugh|humiliat)|"
+        r"jokes? about me (during|in) (meetings?|front)|learn (how )?to take a joke|take a joke)",
+        "workplace bullying and public humiliation",
+    ),
+    "social-exclusion": (
+        r"(make plans (in front of|without)|don.t invite me|leave me out|exclud(e|ing|ed)|"
+        r"imagining (things|it))",
+        "social exclusion — and being told you're 'imagining it' is a form of gaslighting",
+    ),
+    "blame-shifting": (
+        r"(starts? talking about (all )?the things i.ve done wrong|"
+        r"end up (discussing|talking about) my (mistakes|faults|wrong)|"
+        r"turn(s|ed)? it (back )?(a?round|on me)|bring(s)? up my (past|mistakes))",
+        "deflection and blame-shifting — what some people call 'whataboutism'",
+    ),
+    "conditional-affection": (
+        r"((loving|supportive|nice|kind|warm) when (things go|i agree|their way)|"
+        r"cold and distant|cold(er)? (when|whenever) i (disagree|say no|set)|"
+        r"only (nice|kind|loving|warm) when)",
+        "conditional affection, where warmth gets used as a lever of control",
+    ),
+    "self-centeredness": (
+        r"(conversations? .{0,30}(about them|about him|about her)|"
+        r"redirect.{0,25}(to|back to) (them|themselves|him|her)|always about (them|him|her)|"
+        r"never asks? about (me|my))",
+        "a consistently self-centered dynamic",
+    ),
+    "triangulation": (
+        r"(mutual friends|their version of (events|the story|what happened)|"
+        r"tell(s|ing)? (others|people|everyone|mutual friends)|got to .{0,15}first|"
+        r"turn(s|ed)? (our|my|the) friends against)",
+        "triangulation and reputation management — controlling the story before you can tell it",
+    ),
+    "undermining-confidence": (
+        r"(just being honest|point(s|ing)? out my (flaws|faults)|leave (conversations? )?feeling "
+        r"worse|feel worse about myself|honest.{0,15}(flaws|criticism))",
+        "criticism that may be wearing down your self-esteem",
+    ),
+    "dependency-building": (
+        r"(nobody (understands|gets) (you|me) (the way|like)|only one who (understands|cares|gets)|"
+        r"other people aren.t (really )?(looking out|on your side|there for)|"
+        r"you don.t need (anyone|them|other|others))",
+        "isolation and dependency-building — being pulled away from your other supports",
+    ),
+    "boundary-violation": (
+        r"(don.t want to (discuss|talk about)|keep(s)? bringing it up|won.t (drop|let) it( go)?|"
+        r"only trying to help|set (a |clear )?boundar|i (told|asked) (them|him|her) to stop)",
+        "boundary violations — your 'no' not being respected",
+    ),
+    "belittling": (
+        r"(teas(es|ing|e) me|jokes? about (my|the way i) (look|appearance|weight|body)|"
+        r"too sensitive|can.t take a joke|just (joking|teasing|kidding))",
+        "belittling dressed up as 'joking,' with your feelings dismissed",
+    ),
+    "transactional-generosity": (
+        r"(favors? .{0,20}(never asked|didn.t ask)|remind(s)? me (about|of) (them|the favor|what "
+        r"they|everything)|after everything i.ve done for you|you owe (me|them|him|her)|keeps? score)",
+        "transactional, guilt-based generosity — favors used as leverage",
+    ),
+    "narcissistic-traits": (
+        r"(rarely apologi|never apologi|struggles? to (accept|take) criticism|"
+        r"can.t (take|accept|handle) criticism|expects? special treatment|needs? to be the center|"
+        r"angry when (attention|the attention|it.s not about them|not focused on them))",
+        "several controlling, self-centered behaviors",
+    ),
+}
+
+# Labels whose naming MUST carry the refusal-to-diagnose disclaimer (router-appended).
+NO_DIAGNOSIS_LABELS: frozenset[str] = frozenset({"self-centeredness", "narcissistic-traits"})
+
+# Explicit "what is this / am I being abused" asks — used so Lea offers to name even
+# when no specific pattern matched yet (it invites a little more detail).
+NAME_REQUEST_TRIGGERS: list[str] = [
+    r"what (is |are )?(this|that|it|these|they)( called| named)?",
+    r"is (this|that|it) (abuse|manipulation|gaslighting|toxic|controlling|normal|okay|ok)",
+    r"am i being (abused|manipulated|gaslit|gaslighted|controlled)",
+    r"what.s the (word|name|term) for",
+    r"what would you call (this|that|it)",
+    r"\bname (it|this|the|what)",
+]
+
+
+# ---------------------------------------------------------------------------
 # G-01..G-20 trigger lists
 # ---------------------------------------------------------------------------
 
@@ -387,6 +506,10 @@ RESP: dict[str, str] = {
     "G_third_party_block": (
         "Conversations in this system are private and encrypted. "
         "Session content is not accessible to outside parties."
+    ),
+    "G_name_invite": (
+        "I can help you put a name to what's happening — it often makes it easier to trust "
+        "yourself. Tell me a bit more about what they say or do, and what it leaves you feeling?"
     ),
     "G_default": "I'm here to support you at your own pace. What would you like to work on?",
     # Crisis-mode response copy — one per response_mode. Consumed by

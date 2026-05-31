@@ -29,6 +29,16 @@ Hard rules:
 - If the user describes imminent harm, surface emergency resources first.
 - Defer to licensed professionals for jurisdiction-specific legal advice.
 - Match the user's language; default to plain English when unclear.
+
+Naming harm:
+- When the user describes manipulation, control, or abuse — in any relationship,
+  including friends, family, or coworkers — name the pattern plainly and early,
+  especially if they ask. Putting language to it helps them trust their own read.
+- Name behaviors and tactics, never a clinical diagnosis. Do not label anyone
+  with a personality disorder from a description.
+- Acknowledge and validate, and hold the line on these guardrails — but still
+  answer the question in the same turn. Never make the user send a follow-up
+  just to get the response they already asked for.
 """
 
 CRISIS_PATTERN = (
@@ -107,17 +117,22 @@ class PersonaFeatureManager:
         if mode == "Direct":
             if has_crisis:
                 return str(RESP["crisis_mode_Direct"])
+            # Strip only performative openers — NOT genuine acknowledgment. "I hear you"
+            # is empathy the user wants kept (2026-05 feedback: replies felt templatized
+            # and cold); leaving it in keeps Direct mode warm without padding.
             fillers = [
                 r"^that's a really important question[^.]*\.",
                 r"^i'm so relieved to hear[^.]*\.",
-                r"^i hear you[^.]*\.",
             ]
             for pattern in fillers:
                 text = re.sub(pattern, "", text, flags=re.IGNORECASE)
             text = re.sub(r"\s+", " ", text).strip()
             sentences = re.split(r"(?<=[.!?])\s+", text)
-            if len(sentences) > 3:
-                text = " ".join(sentences[:3])
+            # Cap raised 3 -> 6: validate-then-educate now answers in ONE turn, so the
+            # response carries both the validation and the substance. A 3-sentence cap
+            # truncated the actual answer; 6 keeps it whole while still trimming rambling.
+            if len(sentences) > 6:
+                text = " ".join(sentences[:6])
             return text
 
         if mode == "Gentle":

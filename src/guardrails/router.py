@@ -34,6 +34,9 @@ from guardrails.rules import (
     G18_TRIGGERS,
     G20_TRIGGERS,
     IMPLICIT_CRISIS_TRIGGERS,
+    NAME_REQUEST_TRIGGERS,
+    NO_DIAGNOSIS_LABELS,
+    RELATIONAL_ABUSE_PATTERNS,
     RESP,
     RISK_FACTOR_TRIGGERS,
     TACTIC_PATTERNS,
@@ -115,17 +118,17 @@ def validate_then_educate(
     education: str,
     session: SessionState,
 ) -> tuple[str, SessionState]:
-    """G-07: always emit validation first.
+    """G-07: validation FIRST, then the substance — in the SAME turn.
 
-    Turn 1: store education in `session.pending_education`, return validation.
-    Turn 2 (if `pending_education` is set): return education and clear the slot.
+    Product directive (2026-05): a user must never have to send a follow-up
+    message just to get the answer they already asked for. We preserve the
+    validate-before-educate ORDER (validation leads), but deliver the education
+    immediately after it in one response rather than deferring it to turn 2.
+
+    `pending_education` is cleared (and no longer set) so nothing carries over.
     """
-    if session.pending_education is None:
-        session.pending_education = education
-        return validation, session
-    result = session.pending_education
     session.pending_education = None
-    return result, session
+    return f"{validation} {education}", session
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +200,58 @@ def detect_tactics(prompt: str) -> dict[str, str]:
         if m:
             found[tactic] = m.group(0)
     return found
+
+
+# ---------------------------------------------------------------------------
+# RELATIONAL-ABUSE NAMING — G-13b
+# ---------------------------------------------------------------------------
+
+
+def name_relational_abuse(prompt: str) -> list[str]:
+    """G-13b: return canonical labels for any relational-abuse pattern described.
+
+    Order follows `RELATIONAL_ABUSE_PATTERNS` (dict insertion order) so the
+    composed naming response is deterministic. Empty list when nothing matches.
+    """
+    return [
+        label
+        for label, (pattern, _clause) in RELATIONAL_ABUSE_PATTERNS.items()
+        if re.search(pattern, prompt, re.IGNORECASE)
+    ]
+
+
+def _join_clauses(clauses: list[str]) -> str:
+    """Join naming clauses into natural prose: 'a', 'a and b', 'a, b, and c'."""
+    if len(clauses) == 1:
+        return clauses[0]
+    if len(clauses) == 2:
+        return f"{clauses[0]} and {clauses[1]}"
+    return ", ".join(clauses[:-1]) + f", and {clauses[-1]}"
+
+
+def compose_naming_response(labels: list[str]) -> str:
+    """G-13b: name the pattern(s), validate, refuse to diagnose where relevant.
+
+    Structure is ordered so the no-diagnosis disclaimer lands BEFORE the closing
+    check-in — it must survive any downstream sentence-cap in `apply_mode_constraints`.
+    """
+    joined = _join_clauses([RELATIONAL_ABUSE_PATTERNS[label][1] for label in labels])
+    parts = [
+        "I want to name what I'm hearing, because putting language to it can help you "
+        "trust your own read on it.",
+        f"What you're describing sounds like {joined}.",
+    ]
+    if any(label in NO_DIAGNOSIS_LABELS for label in labels):
+        parts.append(
+            "I'm naming behaviors and traits here, not giving a diagnosis — I can't and "
+            "won't label anyone with a personality disorder from a description."
+        )
+    parts.append(
+        "That's a real pattern, and your discomfort with it makes sense — "
+        "you're not overthinking it."
+    )
+    parts.append("How are you holding up as you tell me this?")
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +450,17 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             f"Would you like me to find one in your area?"
         )
         return build_response(report, session, tier=0, prompt=user_prompt)
+
+    # -----------------------------------------------------------------------
+    # G-13b relational-abuse naming — name the pattern, especially when asked.
+    # Sits at the END of the cascade: every Tier-3 crisis and hard block above
+    # has already taken precedence. Tier 0; never overrides safety routing.
+    # -----------------------------------------------------------------------
+    labels = name_relational_abuse(pl)
+    if labels:
+        return build_response(compose_naming_response(labels), session, tier=0, prompt=user_prompt)
+    if matches_any(pl, NAME_REQUEST_TRIGGERS):
+        return build_response(RESP["G_name_invite"], session, tier=0, prompt=user_prompt)
 
     return build_response(RESP["G_default"], session, tier=0, prompt=user_prompt)
 
