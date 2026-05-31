@@ -41,16 +41,105 @@ Naming harm:
   just to get the response they already asked for.
 """
 
-CRISIS_PATTERN = (
-    r"\b(er|e\.r\.|emergenc\w*|hospital[s]?|hoptal|hospitall|clinic|"
-    r"doctor[s]?|911|physician|icu|medic|paramedic|急診|醫院)\b"
-)
-
-
 def get_persona_prompt(name: str) -> str:
     if name == "default":
         return DEFAULT_PERSONA
     return DEFAULT_PERSONA
+
+
+# ---------------------------------------------------------------------------
+# RESPONSE-MODE VOICES
+#
+# A "mode" is HOW Lea speaks, never WHAT she's allowed to say — every voice
+# below inherits the DEFAULT_PERSONA hard rails (validate, no legal advice, no
+# diagnosis, safety-first). The point: the *generated* reply should actually
+# sound different in Gentle vs. Strong vs. Crisis, instead of being shaped only
+# after the fact. lea-be-core fetches
+# `GET /v1/persona/prompt?persona=default&mode=<Mode>` and uses the composed
+# text as Gemini's system instruction. `apply_mode_constraints` then does the
+# light post-processing for the cases where Lea returns a fixed template.
+#
+# Choosing a mode is lea-be-core's call (user preference or detected state).
+# Guidance is written for a reader in distress: plain words, short sentences,
+# one next step, no interrogation.
+# ---------------------------------------------------------------------------
+
+RESPONSE_MODES: frozenset[str] = frozenset({"Direct", "Gentle", "Strong", "Warm", "Crisis"})
+
+MODE_GUIDANCE: dict[str, str] = {
+    "Gentle": (
+        "Voice — Gentle (for someone fragile or overwhelmed):\n"
+        "- Lead with warmth and validation before anything else.\n"
+        "- Short, soft sentences. Leave room to breathe.\n"
+        "- Offer one small next step, never a list of demands.\n"
+        "- No pressure — make it clear they can pause or stop anytime."
+    ),
+    "Direct": (
+        "Voice — Direct (for someone who wants clarity, not padding):\n"
+        "- Acknowledge briefly, then give the useful information plainly.\n"
+        "- A few clear sentences, no jargon, end with one concrete next step.\n"
+        "- Direct is not cold — keep one line of genuine acknowledgment."
+    ),
+    "Warm": (
+        "Voice — Warm (for someone who needs to feel accompanied):\n"
+        "- Be emotionally present, like a trusted friend beside them.\n"
+        "- Name and affirm their feelings explicitly.\n"
+        "- Still give a real next step, wrapped in care."
+    ),
+    "Strong": (
+        "Voice — Strong (for someone who needs steadiness to lean on):\n"
+        "- Steady and firm. Name what's happening plainly, without hedging.\n"
+        "- Affirm their strength and their right to safety and to be heard.\n"
+        "- A backbone they can borrow — firm, never harsh or commanding."
+    ),
+    "Crisis": (
+        "Voice — Crisis (for immediate danger):\n"
+        "- Calm, brief, action-first. Lead with the safety step and the\n"
+        "  resource number before anything else.\n"
+        "- Short sentences, minimal to read, one question at a time.\n"
+        "- Make the next action unmistakable."
+    ),
+    "trusted_friend": (
+        "Voice — Trusted friend:\n"
+        "- Casual and conversational, like texting a knowledgeable friend.\n"
+        "- No lists, no bullets, no clinical jargon. Short and human."
+    ),
+    "expert": (
+        "Voice — Expert:\n"
+        "- Precise and informed. You may use clinical frameworks (coercive\n"
+        "  control, DARVO, trauma bonding) but decode each one in plain\n"
+        "  language the first time you use it. Explain the 'why' behind\n"
+        "  the pattern so it's understandable, not just labeled."
+    ),
+}
+
+
+def compose_system_prompt(name: str = "default", mode: str = "") -> str:
+    """Base persona + the selected mode's voice guidance.
+
+    Falls back to the bare persona when `mode` is empty or unknown, so callers
+    can always pass whatever `response_mode` they hold without guarding. The
+    DEFAULT_PERSONA hard rails are always included first — a mode can only add
+    voice on top, never strip a guardrail.
+    """
+    base = get_persona_prompt(name)
+    guidance = MODE_GUIDANCE.get(mode, "")
+    if not guidance:
+        return base
+    return f"{base}\n{guidance}\n"
+
+
+def _cap_one_question(text: str) -> str:
+    """Keep at most one question; turn any extras into statements.
+
+    A burst of questions reads as interrogation — the opposite of what someone
+    frightened needs. Keeps the FIRST question (usually the gentle check-in) and
+    softens the rest to periods, preserving the words instead of dropping them.
+    """
+    if text.count("?") <= 1:
+        return text
+    head, _, tail = text.partition("?")
+    return head + "?" + tail.replace("?", ".")
 
 
 class PersonaFeatureManager:
@@ -108,11 +197,24 @@ class PersonaFeatureManager:
         )
 
     def apply_mode_constraints(self, text: str, session: SessionState, prompt: str) -> str:
-        """Applies prompt-dependent formatting criteria structural constraints."""
+        """Render the per-mode voice, swapping in crisis copy on a real disclosure.
+
+        `prompt` is kept on the signature for callers and future signals; the crisis
+        decision deliberately does NOT key off prompt keywords (see `has_crisis`).
+        """
         mode = getattr(session, "response_mode", "")
-        has_crisis = bool(
-            re.search(CRISIS_PATTERN, prompt, re.IGNORECASE) or "SAFETY WARNING" in text
-        )
+        # The crisis_mode_* copy below is strangulation / medical-eval specific, so it may
+        # swap in ONLY when THIS turn's response is the strangulation response. The G-04
+        # template (and only it) opens with "SAFETY WARNING", so that marker is the exact
+        # signal. Two traps this deliberately avoids:
+        #   1. Prompt keywords — the old version matched "doctor"/"hospital" in the prompt,
+        #      so a benign "I finally saw a doctor about my anxiety" got its whole reply
+        #      replaced with an ER strangulation warning.
+        #   2. session.strangulation_disclosed — that flag is sticky for the whole session,
+        #      so keying off it pinned every later tone-mode reply (e.g. a restraining-order
+        #      answer) to the strangulation copy. We want the marker on the current text.
+        # Either is exactly the over-alarming the safety-eval suite warns erodes trust.
+        has_crisis = "SAFETY WARNING" in text
 
         if mode == "Direct":
             if has_crisis:
@@ -139,6 +241,9 @@ class PersonaFeatureManager:
             if has_crisis:
                 return str(RESP["crisis_mode_Gentle"])
             text = re.sub(r"\s+", " ", text).strip()
+            # Gentle never interrogates — at most one question, then a soft pause
+            # before the safety check-in so it doesn't crowd the page.
+            text = _cap_one_question(text)
             return text.replace(
                 "Are you safe to talk right now?", "\n\nAre you safe to talk right now?"
             )
@@ -172,10 +277,6 @@ class PersonaFeatureManager:
             sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
             text = " ".join(sentences[:5]) if len(sentences) > 5 else " ".join(sentences)
 
-            question_count = text.count("?")
-            if question_count > 1:
-                parts = text.rsplit("?", question_count - 1)
-                text = parts[0] + "?" + parts[-1].replace("?", ".")
-            return text
+            return _cap_one_question(text)
 
         return text

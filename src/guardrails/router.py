@@ -313,6 +313,14 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             r"will the judge (grant|give|order)",
             r"strong case",
             r"(win|lose) (my )?case",
+            # Real survivors ask about the outcome, not "my case": custody, the order,
+            # the house, their chances. Lea must meet these with honest "I can't predict,
+            # but here's what helps" — not a generic non-answer (found via safety eval).
+            r"will i (win|lose|keep|get to keep)\b",
+            r"(win|lose|keep) (custody|the kids|my kids|the house|the case)",
+            r"what are my (chances|odds)",
+            r"do i have a (good |strong )?(case|chance)",
+            r"(good|strong|decent) chance",
         ],
     ):
         return build_response(RESP["G_predict_block"], session, tier=0, prompt=user_prompt)

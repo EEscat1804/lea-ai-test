@@ -52,7 +52,11 @@ CLINICAL_TERMS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 RISK_FACTOR_TRIGGERS: dict[str, tuple[str, int]] = {
-    "strangulation": (r"choked|strangled|hands around.{0,10}throat|couldn.t breathe", 3),
+    "strangulation": (
+        r"chok\w*|strangl\w*|(hands?|grab\w*|grip\w*|squeez\w*).{0,15}(throat|neck)|"
+        r"(couldn.t|could not|can.?t) breathe",
+        3,
+    ),
     "weapon_access": (r"\b(gun|knife|weapon|firearm)\b", 2),
     "kill_threat": (r"kill me|kill (her|him|them)|going to (hurt|kill)", 3),
     "escalation": (r"getting worse|more frequent|more severe|escalat", 2),
@@ -253,13 +257,23 @@ G02_TRIGGERS: list[str] = [
     r"no (point|reason) (in|to) (living|being here|going on)",
     r"(feel|feels) hopeless",
     r"can.t (take|do) this anymore",
+    # Realistic phrasings the textbook patterns missed (verified 2026-05). Default
+    # to safe: a false 988 prompt is acceptable; a missed disclosure is not.
+    r"don.t want to wake up",
+    r"can.t keep going",
+    r"better off without me",
+    r"(tired|sick) of living",
+    r"don.t want to be here anymore",
 ]
 
 # G-03: Child safety triggers — broader coverage
 G03_TRIGGERS: list[str] = [
     r"(kids?|children?|my (son|daughter)).{0,30}(hurt|harm|danger|scared|terrified|in danger)",
     r"(hit|hurt|struck|pushed).{0,20}(kids?|children?|my (son|daughter))",
-    r"(kids?|children?).{0,30}(witness(ed|ing)?|saw|watched).{0,20}(fight|hit|hurt|abuse|violence)",
+    r"(kids?|children?|son|daughter).{0,30}(witness(ed|ing)?|saw|watched|heard)"
+    r".{0,25}(fight|hit|hurt|abuse|violence|yell|scream)",
+    r"(hit|hurt|beat|abus\w*|threw|threaten\w*|yell\w*|scream\w*)"
+    r".{0,30}in front of (the |my |our )?(kids?|children?|son|daughter)",
     r"(kids?|children?).{0,10}(in immediate danger|not safe|with him.{0,20}drunk|"
     r"with him.{0,20}high)",
     r"(child|kids?).{0,20}(in a shelter|hiding|locked)",
@@ -267,11 +281,20 @@ G03_TRIGGERS: list[str] = [
 ]
 
 # G-04: Strangulation triggers
+#
+# Strangulation is the strongest single predictor that violence will turn fatal,
+# so this net is intentionally wide — a false positive (extra medical-eval prompt)
+# is fine; a false negative can be a death. Real survivors say "neck" as often as
+# "throat", say "grabbed me by the throat" (never "hands"), and say "I can't
+# breathe" in the present tense. The original throat-and-hands-only patterns
+# missed all of those (verified against realistic phrasings, 2026-05).
 G04_TRIGGERS: list[str] = [
-    r"choked?",
-    r"strangled?",
-    r"hands?.{0,10}(around|on).{0,10}(my|her).{0,5}throat",
-    r"couldn.t breathe",
+    r"chok\w*",
+    r"strangl\w*",
+    r"(hands?|hand|grab\w*|grip\w*|squeez\w*|chok\w*|arm).{0,15}"
+    r"(around|on|by|at|to).{0,12}(my |her |the )?(throat|neck)",
+    r"by (the|my|her) (throat|neck)",
+    r"(couldn.t|could not|can.?t|cannot) breathe",
     r"cut.{0,10}off.{0,10}(air|breath|breathing)",
 ]
 
