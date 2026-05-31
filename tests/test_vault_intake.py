@@ -1,4 +1,4 @@
-from src.vault.intake import determine_next_step
+from vault.intake import determine_next_step
 
 
 def test_fl_requires_petitioner_race_field() -> None:

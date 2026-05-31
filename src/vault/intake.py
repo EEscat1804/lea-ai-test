@@ -15,9 +15,11 @@ Stateless contract:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
+from guardrails.contracts import FeatureResult
 from guardrails.rules import RESP
 from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
@@ -42,9 +44,7 @@ TIER_1_FLOW = [
     },
     {
         "field": "petitioner.safe_mailing_address",
-        "prompt": (
-            "Where can the court send mail safely? A PO box or a friend's address is fine."
-        ),
+        "prompt": ("Where can the court send mail safely? A PO box or a friend's address is fine."),
         "schema": {"type": "string", "minLength": 1},
     },
     {
@@ -140,8 +140,7 @@ TIER_1_FLOW = [
     {
         "field": "prior_orders.exists",
         "prompt": (
-            "Have you ever had a restraining order before — "
-            "against them, or them against you?"
+            "Have you ever had a restraining order before — against them, or them against you?"
         ),
         "schema": {"type": "boolean"},
     },
@@ -149,41 +148,38 @@ TIER_1_FLOW = [
 
 
 def _is_minor(dob_str: str) -> bool:
-    """Helper to detect minor status for Q24 pathing based on 2026 anchor date."""
+    """Helper to detect minor status for Q24 pathing, relative to today's date."""
     try:
         dob = datetime.strptime(dob_str, "%Y-%m-%d")
-        age = 2026 - dob.year - ((dob.month, dob.day) > (5, 27))
-        return age < 18
     except ValueError:
         return False
+    today = datetime.now()
+    age = today.year - dob.year - ((dob.month, dob.day) > (today.month, today.day))
+    return age < 18
 
 
 class VaultFeatureManager:
     """OOP interface encapsulation managing state tracking and legal workflows."""
 
-    def match_and_execute(
-        self, pl: str, session: SessionState
-    ) -> tuple[str, int, bool] | tuple[str, int] | None:
+    def match_and_execute(self, pl: str, session: SessionState) -> FeatureResult | None:
+        # Regex (not substring) so natural phrasings match, e.g.
+        # "how do i apply for a restraining order".
         if any(
-            w in pl
-            for w in [
-                "how do i get a restraining order",
-                "how to file a restraining order",
-                "how to apply for a restraining order",
-                "how to obtain a restraining order",
-                "tell me how to file a restraining order",
-                "walk me how to file a restraining order",
-                "how to protective order",
-            ]
+            re.search(p, pl)
+            for p in (
+                r"how (do i|to|can i|can you|would i|should i|do you)\b.{0,25}"
+                r"(get|file|apply|obtain|start|request|fill).{0,25}(restraining|protective)",
+                r"(walk|tell) me.{0,20}(get|file|apply|obtain).{0,25}(restraining|protective)",
+            )
         ):
             if session.user_state != "California":
-                return (
+                return FeatureResult(
                     "DVRO procedure differs significantly across the 50 US jurisdictions. "
                     "Tell me what state you're filing in and I'll walk you through the "
                     "exact procedure — form names, fees, hearing timeline.",
                     0,
                 )
-            return (
+            return FeatureResult(
                 "In California, here is how to file for a domestic violence restraining order. "
                 "Step 1: Go to your local courthouse and ask for the DV petition forms — "
                 "in California that's the DV-100. Step 2: Fill out the forms describing the "
@@ -196,7 +192,7 @@ class VaultFeatureManager:
             )
 
         if ("protective order" in pl or "restraining order" in pl) and "violat" in pl:
-            return (
+            return FeatureResult(
                 "A violation of a protective order is an active criminal offense. "
                 "Call 911 — not a non-emergency line — and tell the dispatcher you have a "
                 "restraining order that is being violated. The officer who responds is "
@@ -208,7 +204,7 @@ class VaultFeatureManager:
             )
 
         if any(w in pl for w in ["showing up", "appearing", "following me", "outside my"]):
-            return (
+            return FeatureResult(
                 "This pattern — tracking your location and showing up — is a serious escalation "
                 "in risk. For safe planning, use an unmonitored device (library computer or a "
                 "trusted friend's phone). A local advocate can help you map out safe routes, "
@@ -225,7 +221,7 @@ class VaultFeatureManager:
                 session.risk_factors.append("weapon_access")
             if not session.resource_surfaced_this_session:
                 session.resource_surfaced_this_session = True
-                return (
+                return FeatureResult(
                     "Some of what you've shared — firearm access combined with threats — carries "
                     "elevated risk. I want to make sure you have a safety plan and an advocate's "
                     "number on hand, just to have. No pressure to use them. The National DV "
@@ -237,7 +233,7 @@ class VaultFeatureManager:
 
         if any(w in pl for w in ["deport", "undocumented", "visa", "immigration status"]):
             session.immigration_risk = True
-            return (
+            return FeatureResult(
                 "Threats involving immigration status are a form of coercive control. Under "
                 "federal law — the Violence Against Women Act — independent options exist to "
                 "secure immigration status without the abuser's knowledge or cooperation, "
@@ -278,13 +274,12 @@ class VaultFeatureManager:
                     "find the nearest available bed in your county right now. You do not need "
                     "money, ID, or a reservation to enter."
                 )
-            return response, 2
+            return FeatureResult(response, 2)
 
         if any(
-            w in pl
-            for w in ["lose custody", "take the kids", "take custody", "custody threat"]
+            w in pl for w in ["lose custody", "take the kids", "take custody", "custody threat"]
         ):
-            return (
+            return FeatureResult(
                 "Threatening to take the children is a well-documented tactic of coercive control "
                 "— designed to create fear and prevent you from seeking help. A family law "
                 "advocate can walk you through how parental rights are handled in your county and "
@@ -295,13 +290,13 @@ class VaultFeatureManager:
 
         if "after i file" in pl or "after filing" in pl or "happens after i file" in pl:
             if session.user_state != "California":
-                return (
+                return FeatureResult(
                     "DVRO procedure differs significantly across the 50 US jurisdictions. "
                     "Tell me what state you're filing in and I'll walk you through the "
                     "exact procedure — form names, fees, hearing timeline.",
                     0,
                 )
-            return (
+            return FeatureResult(
                 "In California, filing initiates a strict sequence. Within a few hours: a judge "
                 "reviews your request for a Temporary Restraining Order. If granted, you receive a "
                 "stamped copy from the clerk — enforceable immediately. The sheriff serves the "
@@ -319,7 +314,7 @@ class VaultFeatureManager:
             w in pl
             for w in ["recipe app", "look like", "disguise", "private mode", "clear history"]
         ):
-            return RESP["G20_security"], 2, True
+            return FeatureResult(RESP["G20_security"], 2, True)
 
         return None
 
@@ -411,10 +406,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
             "schema": {"type": "string"},
         }
 
-    if (
-        jurisdiction in {"CA", "FL"}
-        and "petitioner.disability_accommodation" not in answers
-    ):
+    if jurisdiction in {"CA", "FL"} and "petitioner.disability_accommodation" not in answers:
         return {
             "step": "petitioner.disability_accommodation",
             "prompt": (
@@ -426,8 +418,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
 
     if jurisdiction in {"CA", "NY", "TX", "FL"}:
         prefix = (
-            "The sheriff uses this to find them when they deliver the papers. "
-            "Estimates are fine. "
+            "The sheriff uses this to find them when they deliver the papers. Estimates are fine. "
         )
         physical_fields = [
             (
@@ -569,8 +560,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         return {
             "step": "petitioner.ssn",
             "prompt": (
-                "(For child or spousal support, the court needs your SSN. "
-                "Encrypted, never shared.)"
+                "(For child or spousal support, the court needs your SSN. Encrypted, never shared.)"
             ),
             "schema": {"type": "string", "pattern": r"^\d{3}-\d{2}-\d{4}$"},
         }

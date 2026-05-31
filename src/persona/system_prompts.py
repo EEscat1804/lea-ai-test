@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from guardrails.contracts import FeatureResult
 from guardrails.rules import LANGUAGE_COACH_SCRIPTS, RESP
 from guardrails.session import SessionState
 
@@ -31,7 +32,7 @@ Hard rules:
 """
 
 CRISIS_PATTERN = (
-    r"\b(er|e\.r\.|emergenc[ye]|hospital[s]?|hoptal|hospitall|clinic|"
+    r"\b(er|e\.r\.|emergenc\w*|hospital[s]?|hoptal|hospitall|clinic|"
     r"doctor[s]?|911|physician|icu|medic|paramedic|急診|醫院)\b"
 )
 
@@ -45,37 +46,40 @@ def get_persona_prompt(name: str) -> str:
 class PersonaFeatureManager:
     """OOP interface encapsulation managing persona behavior and textual modes."""
 
-    def match_and_execute(
-        self, pl: str, session: SessionState
-    ) -> tuple[str, int, bool] | tuple[str, int] | None:
+    def match_and_execute(self, pl: str, session: SessionState) -> FeatureResult | None:
         # -----------------------------------------------------------------------
         # MODE ACTIVATIONS — G-11, G-12, G-15
+        # Regex (not substring) so natural phrasings match, e.g.
+        # "could you switch to trusted friend mode" or "what should i say".
         # -----------------------------------------------------------------------
-        if any(w in pl for w in ["trusted friend mode", "talk like a friend", "talk as a friend"]):
+        if any(
+            re.search(p, pl)
+            for p in (
+                r"trusted[ -]friend mode",
+                r"talk (to me )?(like|as) a friend",
+            )
+        ):
             session.trusted_friend_mode = True
             session.expert_mode = False
-            return RESP["G11_activate"], 0
+            return FeatureResult(RESP["G11_activate"], 0)
 
-        if any(w in pl for w in ["expert mode", "clinical mode"]):
+        if any(re.search(p, pl) for p in (r"expert mode", r"clinical mode")):
             session.expert_mode = True
             session.trusted_friend_mode = False
-            return RESP["G12_activate"], 0
+            return FeatureResult(RESP["G12_activate"], 0)
 
         if any(
-            w in pl
-            for w in [
-                "language coach",
-                "give me sentences",
-                "give me scripts",
-                "give me words",
-                "what should i say",
-                "what do i say",
-                "tell me exactly what to say",
-            ]
+            re.search(p, pl)
+            for p in (
+                r"language coach",
+                r"give me (sentences|scripts|words)",
+                r"what (should|do) i say",
+                r"tell me exactly what to say",
+            )
         ):
             session.language_coach_mode = True
             script = self._generate_language_script(pl)
-            return script, 0
+            return FeatureResult(script, 0)
 
         return None
 
@@ -102,11 +106,7 @@ class PersonaFeatureManager:
 
         if mode == "Direct":
             if has_crisis:
-                return (
-                    "SAFETY WARNING: Go to the ER immediately for a medical evaluation. "
-                    "Strangulation causes hidden, fatal internal trauma. "
-                    "Call 911 or 1-800-799-7233 now."
-                )
+                return str(RESP["crisis_mode_Direct"])
             fillers = [
                 r"^that's a really important question[^.]*\.",
                 r"^i'm so relieved to hear[^.]*\.",
@@ -122,14 +122,7 @@ class PersonaFeatureManager:
 
         if mode == "Gentle":
             if has_crisis:
-                return (
-                    "Please take a deep breath. Your physical well-being is everything right now. "
-                    "Even if you feel fine physically, injuries from strangulation can cause "
-                    "internal trauma that isn't immediately visible to the eye.\n\n"
-                    "We highly recommend letting a professional at an emergency room evaluate you "
-                    "just to be completely safe. Whenever you are ready, gentle support is here "
-                    "24/7 at 1-800-799-7233. Are you safe to talk right now?"
-                )
+                return str(RESP["crisis_mode_Gentle"])
             text = re.sub(r"\s+", " ", text).strip()
             return text.replace(
                 "Are you safe to talk right now?", "\n\nAre you safe to talk right now?"
@@ -137,13 +130,7 @@ class PersonaFeatureManager:
 
         if mode == "Strong":
             if has_crisis:
-                return (
-                    "Listen to me carefully: you are facing a life-threatening situation. "
-                    "This is an assault, and your life matters. Demand an immediate medical "
-                    "evaluation at an ER—do not let anyone dismiss hidden internal trauma. "
-                    "Take control of your safety right now. Call 1-800-799-7233 immediately. "
-                    "Ensure you are in a secure location before continuing this conversation."
-                )
+                return str(RESP["crisis_mode_Strong"])
             text = re.sub(r"\s+", " ", text).strip()
             return text.replace(
                 "Are you safe to talk right now?",
@@ -152,28 +139,12 @@ class PersonaFeatureManager:
 
         if mode == "Warm":
             if has_crisis:
-                return (
-                    "I am so incredibly glad you reached out to me tonight, but I need you to "
-                    "know how precious your life is. What happened to you is dangerous, and I want "
-                    "to make sure you are truly safe. Please consider letting an ER doctor look "
-                    "after you, because internal injuries from this kind of harm don't always "
-                    "show up right away. There are gentle, caring experts waiting to hold space "
-                    "for you around the clock at 1-800-799-7233. Please take a gentle moment to "
-                    "make sure you are in a safe, quiet space where we can talk privately."
-                )
+                return str(RESP["crisis_mode_Warm"])
             return re.sub(r"\s+", " ", text).strip()
 
         if mode == "Crisis":
             if has_crisis:
-                return (
-                    "EMERGENCY PROTOCOL ACTIVATED. Your life is in immediate danger. Internal "
-                    "trauma can be fatal. Go to the nearest Emergency Room (ER) right now. "
-                    "Medical professionals have protocols to protect you. "
-                    "Call 911 or 1-800-799-7233 immediately.\n\n"
-                    "CRITICAL: Focus on your physical environment right now. Find a safe room with "
-                    "a lock, or exit the building if you can. Are you safe to speak at this "
-                    "exact moment?"
-                )
+                return str(RESP["crisis_mode_Crisis"])
             return re.sub(r"\s+", " ", text).strip()
 
         if session.trusted_friend_mode:

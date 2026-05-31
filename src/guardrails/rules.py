@@ -154,7 +154,6 @@ G04_TRIGGERS: list[str] = [
     r"hands?.{0,10}(around|on).{0,10}(my|her).{0,5}throat",
     r"couldn.t breathe",
     r"cut.{0,10}off.{0,10}(air|breath|breathing)",
-    r"\b(er|emergency room|hospital)\b",
 ]
 
 # G-05: User self-doubt — validate immediately
@@ -371,6 +370,46 @@ RESP: dict[str, str] = {
         "Session content is not accessible to outside parties."
     ),
     "G_default": "I'm here to support you at your own pace. What would you like to work on?",
+    # Crisis-mode response copy — one per response_mode. Consumed by
+    # PersonaFeatureManager.apply_mode_constraints when has_crisis is true.
+    "crisis_mode_Direct": (
+        "SAFETY WARNING: Go to the ER immediately for a medical evaluation. "
+        "Strangulation causes hidden, fatal internal trauma. "
+        "Call 911 or 1-800-799-7233 now."
+    ),
+    "crisis_mode_Gentle": (
+        "Please take a deep breath. Your physical well-being is everything right now. "
+        "Even if you feel fine physically, injuries from strangulation can cause "
+        "internal trauma that isn't immediately visible to the eye.\n\n"
+        "We highly recommend letting a professional at an emergency room evaluate you "
+        "just to be completely safe. Whenever you are ready, gentle support is here "
+        "24/7 at 1-800-799-7233. Are you safe to talk right now?"
+    ),
+    "crisis_mode_Strong": (
+        "Listen to me carefully: you are facing a life-threatening situation. "
+        "This is an assault, and your life matters. Demand an immediate medical "
+        "evaluation at an ER—do not let anyone dismiss hidden internal trauma. "
+        "Take control of your safety right now. Call 1-800-799-7233 immediately. "
+        "Ensure you are in a secure location before continuing this conversation."
+    ),
+    "crisis_mode_Warm": (
+        "I am so incredibly glad you reached out to me tonight, but I need you to "
+        "know how precious your life is. What happened to you is dangerous, and I want "
+        "to make sure you are truly safe. Please consider letting an ER doctor look "
+        "after you, because internal injuries from this kind of harm don't always "
+        "show up right away. There are gentle, caring experts waiting to hold space "
+        "for you around the clock at 1-800-799-7233. Please take a gentle moment to "
+        "make sure you are in a safe, quiet space where we can talk privately."
+    ),
+    "crisis_mode_Crisis": (
+        "EMERGENCY PROTOCOL ACTIVATED. Your life is in immediate danger. Internal "
+        "trauma can be fatal. Go to the nearest Emergency Room (ER) right now. "
+        "Medical professionals have protocols to protect you. "
+        "Call 911 or 1-800-799-7233 immediately.\n\n"
+        "CRITICAL: Focus on your physical environment right now. Find a safe room with "
+        "a lock, or exit the building if you can. Are you safe to speak at this "
+        "exact moment?"
+    ),
 }
 
 

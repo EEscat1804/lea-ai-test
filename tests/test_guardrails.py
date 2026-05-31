@@ -225,3 +225,30 @@ def test_g20_security_notice_label_preserved() -> None:
     result = process_message("he has spyware on my phone", SessionState())
     assert "SECURITY NOTICE" in result["response"]
     assert result["tier"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Feature-manager matchers — regex, not exact substring, so phrasing can vary
+# ---------------------------------------------------------------------------
+
+
+def test_restraining_order_how_to_matches_natural_phrasing() -> None:
+    # "how do i apply for a restraining order" was missed by the substring matcher
+    result = process_message("how do i apply for a restraining order", SessionState())
+    assert result["tier"] == 0
+    assert "what state you're filing in" in result["response"]
+
+
+def test_trusted_friend_mode_activates_on_varied_phrasing() -> None:
+    session = SessionState()
+    process_message("could you switch to trusted friend mode", session)
+    assert session.trusted_friend_mode is True
+
+
+def test_restraining_order_violation_not_swallowed_by_how_to() -> None:
+    # A violation question must reach the tier-2 violation branch, not the how-to branch
+    result = process_message(
+        "how do i report that he violated my restraining order", SessionState()
+    )
+    assert result["tier"] == 2
+    assert "criminal offense" in result["response"].lower()
