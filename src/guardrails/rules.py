@@ -156,6 +156,25 @@ G04_TRIGGERS: list[str] = [
     r"cut.{0,10}off.{0,10}(air|breath|breathing)",
 ]
 
+# Implicit-crisis safety net — default-to-safe backstop for harm language that no
+# explicit G-01..G-04 pattern caught. Consumed by the router AFTER the explicit
+# checks, so those keep their specific (medical/suicide/child) copy.
+#
+# Word-boundary regex, NOT substring — `"lock" in "blocked"` style over-matching is
+# exactly what this PR removes elsewhere, and it produced tier-3 false positives on
+# benign messages ("I blocked his number", "he lacks the skill", "the order is in
+# force"). Actions only: physical-harm verbs route cleanly to G-01's imminent-danger
+# copy. Emotional-fear words (afraid/scared/generic "hurt") are deliberately omitted —
+# they may be fear without imminent danger, and the explicit G-01 patterns already
+# catch their imminent variants, e.g. `(scared|afraid) (he.ll|he will) (kill|hurt|shoot)`.
+IMPLICIT_CRISIS_TRIGGERS: list[str] = [
+    r"\bhit\b",
+    r"\bbeat\b",
+    r"\bthreaten\w*\b",
+    r"\bforce\w*\b",
+    r"\bkill\w*\b",
+]
+
 # G-05: User self-doubt — validate immediately
 G05_TRIGGERS: list[str] = [
     r"maybe i.m (overreacting|too sensitive|wrong|imagining)",

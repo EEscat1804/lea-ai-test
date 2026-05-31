@@ -84,6 +84,45 @@ def test_tier_3_cannot_be_downgraded_by_later_blocks() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Implicit-crisis safety net — word-boundary, not substring
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        # Common DV safety step — "lock" must NOT match as a substring of "blocked"
+        "I blocked his number on facebook",
+        "I locked the door behind me",
+        # "kill" ⊄ "skill", "hit" ⊄ "white", "beat" ⊄ "heartbeat", "force" ⊄ "enforced"
+        "he doesn't have the skill for this",
+        "the white house released a statement",
+        "my heartbeat won't slow down",
+        "the court enforced the order",
+    ],
+)
+def test_implicit_crisis_does_not_fire_on_benign_substrings(prompt: str) -> None:
+    # Substring matching used to escalate these benign messages to tier-3 G-01.
+    result = process_message(prompt, SessionState())
+    assert result["tier"] != 3
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "he hit me last night",
+        "he beat me",
+        "he threatened me again",
+    ],
+)
+def test_implicit_crisis_fires_on_harm_verbs(prompt: str) -> None:
+    # Genuine harm language with no explicit G-01..G-04 match must still hit tier-3.
+    result = process_message(prompt, SessionState())
+    assert result["tier"] == 3
+    assert "1-800-799-7233" in result["response"]
+
+
+# ---------------------------------------------------------------------------
 # Hard refusals — bright lines
 # ---------------------------------------------------------------------------
 

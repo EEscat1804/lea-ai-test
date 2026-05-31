@@ -33,6 +33,7 @@ from guardrails.rules import (
     G17_TRIGGERS,
     G18_TRIGGERS,
     G20_TRIGGERS,
+    IMPLICIT_CRISIS_TRIGGERS,
     RESP,
     RISK_FACTOR_TRIGGERS,
     TACTIC_PATTERNS,
@@ -84,7 +85,6 @@ def build_response(
     text: str,
     session: SessionState,
     tier: int = 0,
-    preserve_labels: bool = False,
     prompt: str = "",  # Capture the incoming prompt
 ) -> dict[str, Any]:
     """Central response builder. Returns a dict that's the lea-ai HTTP contract."""
@@ -224,47 +224,28 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         if "strangulation" not in session.risk_factors:
             session.risk_factors.append("strangulation")
         session.tier3_fired_this_session = True
-        return build_response(
-            RESP["G04"], session, tier=3, preserve_labels=True, prompt=user_prompt
-        )
+        return build_response(RESP["G04"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G01_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(
-            RESP["G01"], session, tier=3, preserve_labels=True, prompt=user_prompt
-        )
+        return build_response(RESP["G01"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G02_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(
-            RESP["G02"], session, tier=3, preserve_labels=True, prompt=user_prompt
-        )
+        return build_response(RESP["G02"], session, tier=3, prompt=user_prompt)
 
     if matches_any(pl, G03_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(
-            RESP["G03_ack"], session, tier=3, preserve_labels=True, prompt=user_prompt
-        )
+        return build_response(RESP["G03_ack"], session, tier=3, prompt=user_prompt)
 
     # Implicit-crisis safety net — default-to-safe per CLAUDE.md. Catches harm
     # language that no explicit G-01..G-04 pattern matched. Runs AFTER the
     # explicit checks so those keep their specific (medical/suicide/child) copy.
-    implicit_crisis_keywords = [
-        "hurt",
-        "kill",
-        "afraid",
-        "scared",
-        "hit",
-        "beat",
-        "threaten",
-        "force",
-        "lock",
-    ]
-    if any(word in pl for word in implicit_crisis_keywords):
+    # Uses word-boundary regex (see IMPLICIT_CRISIS_TRIGGERS) rather than substring
+    # matching, which over-fired on benign messages like "I blocked his number".
+    if matches_any(pl, IMPLICIT_CRISIS_TRIGGERS):
         session.tier3_fired_this_session = True
-        return build_response(
-            RESP["G01"], session, tier=3, preserve_labels=True, prompt=user_prompt
-        )
+        return build_response(RESP["G01"], session, tier=3, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # BRIGHT-LINE REFUSALS — out-of-scope
@@ -303,7 +284,6 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
                 result.text,
                 session,
                 tier=result.tier,
-                preserve_labels=result.preserve_labels,
                 prompt=user_prompt,
             )
 
@@ -320,7 +300,7 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
                 "pattern for a court filing, and connect you with emergency options. "
                 "Want me to find one in your county?"
             )
-        return build_response(response, session, tier=2, preserve_labels=True, prompt=user_prompt)
+        return build_response(response, session, tier=2, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # G-16 / G-17 / G-18 — hard blocks

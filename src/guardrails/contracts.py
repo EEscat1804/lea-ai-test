@@ -14,10 +14,10 @@ from typing import NamedTuple
 class FeatureResult(NamedTuple):
     """A feature manager's match result.
 
-    `text` + `tier` are required. `preserve_labels` defaults to False; set it
-    True to keep SECURITY NOTICE / ACTION NEEDED labels and skip prose cleanup.
+    `text` + `tier` are the full contract. SECURITY NOTICE / ACTION NEEDED labels
+    survive formatting because `apply_mode_constraints` only normalizes whitespace
+    and never strips them — no per-result opt-in flag is needed.
     """
 
     text: str
     tier: int
-    preserve_labels: bool = False
