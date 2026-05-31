@@ -32,6 +32,51 @@ def test_default_persona_mentions_emergency_resources() -> None:
 
 
 # ---------------------------------------------------------------------------
+# "About the app" knowledge — accurate, honest about privacy, no internals
+# ---------------------------------------------------------------------------
+
+
+def test_persona_describes_the_app_features() -> None:
+    # Lea should be able to answer "what is this app?" with real features.
+    persona = DEFAULT_PERSONA.lower()
+    assert "vault" in persona
+    assert "journal" in persona
+
+
+def test_persona_is_honest_about_privacy_and_never_overclaims() -> None:
+    # Telling a survivor the app is fully private when it is not can lead them to
+    # over-disclose. The persona must carry the honest limit AND forbid overclaiming.
+    persona = DEFAULT_PERSONA.lower()
+    assert "not fully end-to-end private" in persona
+    assert "never tell a user the app cannot see their chat" in persona
+
+
+def test_persona_points_to_on_device_safety_tools() -> None:
+    persona = DEFAULT_PERSONA.lower()
+    assert "quick-exit" in persona
+    assert "disguise" in persona
+
+
+def test_persona_never_leaks_internal_architecture() -> None:
+    # DEFAULT_PERSONA reaches Gemini and shapes user-facing replies. It must not
+    # carry backend internals that could disclose security posture to an abuser.
+    persona = DEFAULT_PERSONA.lower()
+    forbidden = [
+        "kek",
+        "dek",
+        "hyperdrive",
+        "supabase",
+        "postgres",
+        "gemini",
+        "wrangler",
+        "cloudflare",
+        "lea_master_key",
+    ]
+    for term in forbidden:
+        assert term not in persona, f"internal term leaked into persona: {term!r}"
+
+
+# ---------------------------------------------------------------------------
 # Per-mode voices — each mode must reach Gemini, and NONE may drop a safety rail
 # ---------------------------------------------------------------------------
 
