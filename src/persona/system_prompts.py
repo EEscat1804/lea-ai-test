@@ -57,6 +57,24 @@ About the app (when the user asks what this is, or how it protects them):
   them with support.
 """
 
+# Internal architecture terms that must never surface in any user-facing prompt
+# or model output. DEFAULT_PERSONA reaches Gemini and shapes replies, so a leak
+# here could disclose security posture to an abuser-as-user. Kept module-level
+# so the persona leak-guard test — and any future runtime output filter — share
+# one source of truth instead of drifting out of sync.
+FORBIDDEN_INTERNAL_TERMS: tuple[str, ...] = (
+    "kek",
+    "dek",
+    "hyperdrive",
+    "supabase",
+    "postgres",
+    "gemini",
+    "wrangler",
+    "cloudflare",
+    "lea_master_key",
+)
+
+
 def get_persona_prompt(name: str) -> str:
     if name == "default":
         return DEFAULT_PERSONA

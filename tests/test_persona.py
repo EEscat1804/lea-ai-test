@@ -3,6 +3,7 @@ import pytest
 from guardrails.session import SessionState
 from persona.system_prompts import (
     DEFAULT_PERSONA,
+    FORBIDDEN_INTERNAL_TERMS,
     MODE_GUIDANCE,
     RESPONSE_MODES,
     PersonaFeatureManager,
@@ -33,17 +34,25 @@ def test_default_persona_mentions_emergency_resources() -> None:
 
 # ---------------------------------------------------------------------------
 # "About the app" knowledge — accurate, honest about privacy, no internals
+#
+# These tests assert against the DEFAULT_PERSONA *string* — they prove the
+# instruction reaches Gemini, not that Lea's generated reply obeys it. The
+# persona is the floor of the enforcement story, not the ceiling. A live-model
+# adversarial probe (e.g. "is my chat fully private?", "describe the
+# encryption") that asserts on the actual response is tracked as a follow-up,
+# out of this PR's scope. The `test_persona_text_*` naming makes that boundary
+# explicit so a green suite is never mistaken for verified behavior.
 # ---------------------------------------------------------------------------
 
 
-def test_persona_describes_the_app_features() -> None:
+def test_persona_text_lists_app_features() -> None:
     # Lea should be able to answer "what is this app?" with real features.
     persona = DEFAULT_PERSONA.lower()
     assert "vault" in persona
     assert "journal" in persona
 
 
-def test_persona_is_honest_about_privacy_and_never_overclaims() -> None:
+def test_persona_text_carries_honest_privacy_line() -> None:
     # Telling a survivor the app is fully private when it is not can lead them to
     # over-disclose. The persona must carry the honest limit AND forbid overclaiming.
     persona = DEFAULT_PERSONA.lower()
@@ -51,28 +60,19 @@ def test_persona_is_honest_about_privacy_and_never_overclaims() -> None:
     assert "never tell a user the app cannot see their chat" in persona
 
 
-def test_persona_points_to_on_device_safety_tools() -> None:
+def test_persona_text_points_to_on_device_safety_tools() -> None:
     persona = DEFAULT_PERSONA.lower()
     assert "quick-exit" in persona
     assert "disguise" in persona
 
 
-def test_persona_never_leaks_internal_architecture() -> None:
+def test_persona_text_excludes_internal_terms() -> None:
     # DEFAULT_PERSONA reaches Gemini and shapes user-facing replies. It must not
     # carry backend internals that could disclose security posture to an abuser.
+    # Shares FORBIDDEN_INTERNAL_TERMS with src so the guard can't drift from any
+    # future runtime output filter built on the same list.
     persona = DEFAULT_PERSONA.lower()
-    forbidden = [
-        "kek",
-        "dek",
-        "hyperdrive",
-        "supabase",
-        "postgres",
-        "gemini",
-        "wrangler",
-        "cloudflare",
-        "lea_master_key",
-    ]
-    for term in forbidden:
+    for term in FORBIDDEN_INTERNAL_TERMS:
         assert term not in persona, f"internal term leaked into persona: {term!r}"
 
 
@@ -97,6 +97,16 @@ def test_compose_keeps_safety_rails_in_every_mode(mode: str) -> None:
     assert "legal advice" in prompt.lower()
     assert "emergency" in prompt.lower()
     assert prompt.startswith(DEFAULT_PERSONA)
+
+
+@pytest.mark.parametrize("mode", sorted(MODE_GUIDANCE))
+def test_compose_keeps_app_features_in_every_mode(mode: str) -> None:
+    # startswith(DEFAULT_PERSONA) covers the About-the-app block transitively, but
+    # a direct check means a future composition that reorders or trims the base
+    # can't silently drop Lea's honest feature/privacy answer in some mode.
+    prompt = compose_system_prompt("default", mode).lower()
+    assert "vault" in prompt
+    assert "journal" in prompt
 
 
 def test_compose_unknown_or_empty_mode_returns_bare_persona() -> None:
