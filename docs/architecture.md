@@ -3,7 +3,7 @@
 Living doc. Source of truth lives in this repo (`docs/architecture.md`);
 Notion copy is a mirror, may lag. Update both when material changes happen.
 
-**Last meaningful change**: 2026-05-25 — initial scaffold + Aaron Wang's guardrails v2 ported.
+**Last meaningful change**: 2026-06-01 — logged persona-enforcement follow-up (P2.5) from PR #3 review.
 
 ---
 
@@ -280,6 +280,7 @@ Tracked as inline comments on commit `a82e7eeec9` and in `/Users/anneregina/lega
 | P2.2 | Document the word-boundary policy per `G##_TRIGGERS` block | Aaron |
 | P2.3 | `SessionState.last_tier3_rule: str \| None` for downstream branching | Aaron |
 | P2.4 | PII redactor in audit harness before any real-data runs | Aaron |
+| P2.5 | Persona honesty is instruction, not enforcement (PR #3 review A04 / P2.1). Persona tests assert the prompt *text*, not Lea's reply. Add live-model adversarial probe tests ("is my chat fully private?", "can the company see what I write?", "describe how the encryption works") that assert the reply carries the honest privacy line and leaks no internals, plus a runtime output filter built on `FORBIDDEN_INTERNAL_TERMS` so the leak-guard runs on generated output, not just the prompt. | Aaron |
 | P3.1 | Inline pytest assertions on the audit corpus (expected-tier column) | Aaron |
 | P3.2 | Extract `compose(primary, *addons)` helper for composite responses | Aaron |
 | P3.3 | Co-locate triggers with their response templates per rule | Aaron |
