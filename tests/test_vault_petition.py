@@ -728,6 +728,52 @@ def test_hi_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- Georgia Petition for Family Violence Protective Order ---
+
+
+def test_ga_is_supported_and_metadata():
+    assert "GA" in supported_jurisdictions()
+    out = assemble_petition("GA", {**_CA_ANSWERS, "ga.county": "Fulton"})
+    assert out["form"] == "SC-26"
+    assert out["jurisdiction"] == "GA"
+
+
+def test_ga_maps_core_and_sealed_fact_sheet():
+    answers = {**_CA_ANSWERS, "ga.county": "Fulton", "respondent.gender": "male",
+               "respondent.height": "6ft"}
+    fields = assemble_petition("GA", answers)["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["4_acts"]["value"].startswith("He grabbed my phone")
+    assert fields["1_county"]["value"] == "Fulton"
+    # Respondent identifiers land on the sealed fact sheet.
+    assert fields["conf_resp_sex"]["value"] == "male"
+    assert fields["conf_resp_height"]["value"] == "6ft"
+
+
+def test_ga_relief_checks_their_boxes():
+    answers = {**_CA_ANSWERS, "ga.county": "Fulton",
+               "ga.relief": ["no_abuse", "address_confidential", "fvip"]}
+    fields = assemble_petition("GA", answers)["fields"]
+    assert fields["r_no_abuse"]["value"] == "checked"
+    assert fields["r_address_confidential"]["value"] == "checked"
+    assert fields["r_fvip"]["value"] == "checked"
+    assert fields["r_custody"]["status"] == "not_collected"
+
+
+def test_ga_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("GA", {**answers, "ga.county": "Fulton"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ga_field_table_items_are_unique():
+    from vault.forms import ga
+
+    items = [f.item for f in ga.GA_SC26_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 

@@ -534,6 +534,39 @@ def test_hi_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_GA_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "respondent.height": "6'0", "respondent.weight": "180", "respondent.eye_color": "Brown",
+    "respondent.hair_color": "Black", "respondent.distinguishing_marks": "None",
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+    "respondent.vehicle_make_model": "Sedan", "respondent.vehicle_color": "Blue",
+    "respondent.vehicle_plate": "ABC123",
+    "respondent.dob": "1988-02-02", "respondent.race": "n/a", "respondent.gender": "male",
+    "ga.county": "Fulton",
+}
+
+
+def test_ga_asks_county_then_relief() -> None:
+    base = {k: v for k, v in _GA_THROUGH_TIER2.items() if k != "ga.county"}
+    step = determine_next_step("GA", base)
+    assert step["step"] == "ga.county"
+    step = determine_next_step("GA", _GA_THROUGH_TIER2)
+    assert step["step"] == "ga.relief"
+    assert "address_confidential" in step["schema"]["items"]["enum"]
+
+
+def test_ga_vacate_follow_up() -> None:
+    answers = {**_GA_THROUGH_TIER2, "ga.relief": ["vacate"]}
+    step = determine_next_step("GA", answers)
+    assert step["step"] == "ga.residence_address"
+
+
+def test_ga_reaches_done_when_fully_answered() -> None:
+    answers = {**_GA_THROUGH_TIER2, "ga.relief": ["no_abuse", "no_contact", "address_confidential"]}
+    step = determine_next_step("GA", answers)
+    assert step["step"] == "done"
+
+
 def test_nc_asks_county_then_relief() -> None:
     base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
             "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}

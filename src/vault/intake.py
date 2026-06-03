@@ -26,7 +26,7 @@ from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
 SUPPORTED_JURISDICTIONS = {
-    "CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD", "HI",
+    "CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD", "HI", "GA",
 }
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
@@ -1911,6 +1911,106 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     "How long should the protective order last? You can say something "
                     "like '6 months' or '1 year' — the judge can adjust it."
                 ),
+                "schema": {"type": "string"},
+            }
+
+    # Georgia Petition for Family Violence Protective Order (SC-26, O.C.G.A.
+    # § 19-13) — respondent identifiers (for the sealed fact sheet), county, and
+    # GA's relief list (which includes keeping the address confidential). Maps in
+    # vault.forms.ga.
+    if jurisdiction == "GA":
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": (
+                    "Georgia has a sealed fact sheet for the police. Their race, if you "
+                    "know it — or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "And their sex/gender, if you know — or skip.",
+                "schema": {"type": "string"},
+            }
+        if "ga.county" not in answers:
+            return {
+                "step": "ga.county",
+                "prompt": "Which Georgia county do you live in?",
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "ga.relief" not in answers:
+            return {
+                "step": "ga.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits. "
+                    "Keeping your address confidential is one of the options, and "
+                    "I'd suggest it."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_abuse",  # stop abusing/harassing
+                            "no_contact",  # no direct/indirect contact
+                            "stay_away_distance",  # stay 100 yards away
+                            "vacate",  # vacate residence
+                            "exclusive_residence",  # exclusive use of residence
+                            "pay_rent",  # pay rent/mortgage/utilities
+                            "alternate_housing",  # provide alternate housing
+                            "stay_away_places",  # stay away from residence/work/school
+                            "custody",  # temporary custody
+                            "no_visitation",  # limit/no visitation
+                            "child_support",  # child support
+                            "financial_support",  # financial support
+                            "attorney_fees",  # costs and attorney's fees
+                            "address_confidential",  # keep address confidential
+                            "property_restraint",  # no disposing of property
+                            "utility_insurance_restraint",  # no cutting utilities/insurance
+                            "vehicle",  # exclusive use of vehicle
+                            "remove_property",  # permission to remove property
+                            "drug_evaluation",  # drug/alcohol evaluation
+                            "fvip",  # family violence intervention program
+                            "return_property",  # return property
+                            "reimburse",  # reimburse damages/expenses
+                            "additional",  # additional relief
+                        ],
+                    },
+                },
+            }
+        ga_relief = answers.get("ga.relief", [])
+        if (
+            "vacate" in ga_relief or "exclusive_residence" in ga_relief
+        ) and "ga.residence_address" not in answers:
+            return {
+                "step": "ga.residence_address",
+                "prompt": "What's the address of the home?",
+                "schema": {"type": "string"},
+            }
+        if "vehicle" in ga_relief and "ga.vehicle" not in answers:
+            return {
+                "step": "ga.vehicle",
+                "prompt": "Which vehicle? Make, model, year if you know.",
+                "schema": {"type": "string"},
+            }
+        if "return_property" in ga_relief and "ga.return_property_desc" not in answers:
+            return {
+                "step": "ga.return_property_desc",
+                "prompt": "Which property do you want returned to you?",
+                "schema": {"type": "string"},
+            }
+        if "additional" in ga_relief and "ga.other_relief" not in answers:
+            return {
+                "step": "ga.other_relief",
+                "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
 
