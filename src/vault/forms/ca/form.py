@@ -146,7 +146,7 @@ _INCIDENT_SUBFIELDS = [
 # Field table. Ordered by DV-100 item number. Items 1-9 are the factual core
 # the intake graph feeds today; items 10-31 (the "orders you want a judge to
 # make" section) are largely not collected yet — they are listed so the gap is
-# explicit. See DV-100_coverage.md for the full gap analysis.
+# explicit. See coverage.md for the full gap analysis.
 # ---------------------------------------------------------------------------
 CA_DV100_FIELDS: tuple[FormField, ...] = (
     # 1 — Person Asking for Protection (petitioner)

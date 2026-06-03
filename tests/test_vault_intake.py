@@ -388,6 +388,33 @@ def test_tx_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_PA_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "respondent.height": "6'0", "respondent.weight": "180", "respondent.eye_color": "Brown",
+    "respondent.hair_color": "Black", "respondent.distinguishing_marks": "None",
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+    "respondent.dob": "1988-02-02", "respondent.race": "n/a", "respondent.gender": "male",
+}
+
+
+def test_pa_asks_relief_after_tier2() -> None:
+    step = determine_next_step("PA", _PA_THROUGH_TIER2)
+    assert step["step"] == "pa.relief"
+    assert "relinquish_firearms" in step["schema"]["items"]["enum"]
+
+
+def test_pa_evict_follow_up() -> None:
+    answers = {**_PA_THROUGH_TIER2, "pa.relief": ["evict"]}
+    step = determine_next_step("PA", answers)
+    assert step["step"] == "pa.evict_residence"
+
+
+def test_pa_reaches_done_when_fully_answered() -> None:
+    answers = {**_PA_THROUGH_TIER2, "pa.relief": ["restrain_abuse", "no_contact"]}
+    step = determine_next_step("PA", answers)
+    assert step["step"] == "done"
+
+
 def test_va_is_accepted_and_asks_conditions() -> None:
     # VA walks Tier-1 + physical/employer/vehicle + the VA respondent-description
     # questions, then asks which conditions to request.

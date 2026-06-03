@@ -6,7 +6,7 @@ only — never commit a form filled with a survivor's information.**
 
 | Form | Title | Rev. | Status |
 |---|---|---|---|
-| DV-100 | Request for Domestic Violence Restraining Order | 2025-01-01 | mapped (`../ca_dv100.py`) |
+| DV-100 | Request for Domestic Violence Restraining Order | 2025-01-01 | mapped (`form.py`) |
 | DV-110 | Temporary Restraining Order | — | not yet mapped |
 | DV-109 | Notice of Court Hearing | — | not yet mapped |
 | CLETS-001 | Confidential Information for Law Enforcement | — | not yet mapped (respondent physical description lands here, not on DV-100) |
@@ -15,7 +15,7 @@ only — never commit a form filled with a survivor's information.**
 ## How the pieces fit
 
 - `vault.intake` collects the answers (jurisdiction-aware question flow).
-- `vault.forms.ca_dv100` maps those answers onto DV-100's numbered items.
+- `vault.forms.ca` maps those answers onto DV-100's numbered items.
 - `vault.petition.assemble_petition("CA", answers)` returns the field map.
 - **lea-be-core** stamps the field map onto the fillable PDF and serves it.
   lea-ai never renders a PDF (Pyodide dependency budget + stateless contract).

@@ -9,7 +9,7 @@ CA (DV-100) is the reference implementation. Other jurisdictions land the
 same way: add a `vault.forms.<state>` module and dispatch to it here.
 
 This module returns a structured field map, not a PDF — lea-be-core renders
-it onto the official fillable form. See `vault.forms.ca_dv100` for the
+it onto the official fillable form. See `vault.forms.ca` for the
 contract and the marker discipline (`[FACT NEEDED]`, review flags).
 """
 
@@ -19,14 +19,15 @@ from collections.abc import Callable
 from typing import Any
 
 from lib.responses import json_response, problem_response
-from vault.forms import ca_dv100, tx_app, va_dc383, wa_po001
+from vault.forms import ca, pa, tx, va, wa
 
-# jurisdiction -> assembler. Add a state here when its forms module lands.
+# jurisdiction -> assembler. Add a state here when its forms package lands.
 _ASSEMBLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-    "CA": ca_dv100.assemble,
-    "WA": wa_po001.assemble,
-    "VA": va_dc383.assemble,
-    "TX": tx_app.assemble,
+    "CA": ca.assemble,
+    "WA": wa.assemble,
+    "VA": va.assemble,
+    "TX": tx.assemble,
+    "PA": pa.assemble,
 }
 
 

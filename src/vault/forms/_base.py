@@ -1,6 +1,6 @@
 """Shared scaffolding for per-jurisdiction form mappings.
 
-Each state's module (`ca_dv100`, `wa_po001`, …) declares a table of `FormField`s
+Each state's module (`ca.form`, `wa.form`, …) declares a table of `FormField`s
 and calls `assemble_form` to turn intake answers into the structured, auditable
 `item -> value` map that lea-be-core stamps onto the official PDF.
 

@@ -6,7 +6,7 @@ survivor's information.**
 
 | Form | Title | Rev. | Status |
 |---|---|---|---|
-| DC-383 | Petition for Protective Order | 07/24 | mapped (`../va_dc383.py`) |
+| DC-383 | Petition for Protective Order | 07/24 | mapped (`form.py`) |
 | DC-621 | Non-Disclosure Addendum | — | not yet mapped (petitioner contact + per-member DOB/gender/race) |
 
 ## Notes
@@ -16,7 +16,7 @@ survivor's information.**
   act-of-violence statement, and a few requested-conditions checkboxes), then
   court-filled summons/service pages.
 - The VA intake section fills the VA-specific items (respondent description, the
-  preliminary-order request, the requested conditions). See `DC-383_coverage.md`.
+  preliminary-order request, the requested conditions). See `coverage.md`.
 - Petitioner identifying info goes on **DC-621** (Non-Disclosure Addendum), kept
   separate from the public petition — not yet mapped.
 - Drop the official blank fillable PDFs here for lea-be-core's renderer. Source:

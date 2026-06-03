@@ -11,7 +11,7 @@ existing TX Tier-2 branches) feeds the TX-specific items. TX's terms list (item
 8 a-n) is its own, distinct from CA's and WA's.
 
 Same contract as the other form modules (see `_base`): never renders a PDF,
-never guesses, flags attorney-review mappings. See APPLICATION_coverage.md.
+never guesses, flags attorney-review mappings. See coverage.md.
 
 Owners: Pranav, Aaron.
 """

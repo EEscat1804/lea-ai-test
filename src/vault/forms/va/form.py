@@ -10,7 +10,7 @@ The VA intake section (`vault.intake`, the `jurisdiction == "VA"` block) plus
 the shared physical-description block feed the VA-specific items.
 
 Same contract as the other form modules (see `_base`): never renders a PDF,
-never guesses, flags attorney-review mappings. See DC-383_coverage.md.
+never guesses, flags attorney-review mappings. See coverage.md.
 
 Owners: Pranav, Aaron.
 """

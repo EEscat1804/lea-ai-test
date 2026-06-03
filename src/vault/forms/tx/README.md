@@ -5,8 +5,8 @@ templates only — never commit a form filled with a survivor's information.**
 
 | Form | Title | Status |
 |---|---|---|
-| Application for Protective Order | Tex. Fam. Code / Penal Code Title 5-6 | mapped (`../tx_app.py`) |
-| Affidavit / Declaration | sworn statement (part of the packet) | mapped (within `tx_app.py`) |
+| Application for Protective Order | Tex. Fam. Code / Penal Code Title 5-6 | mapped (`form.py`) |
+| Affidavit / Declaration | sworn statement (part of the packet) | mapped (within `form.py`) |
 
 ## Notes
 
@@ -17,7 +17,7 @@ templates only — never commit a form filled with a survivor's information.**
   (public, no notary). The Vault maps the Application + the Affidavit/Declaration
   statement fields.
 - The TX intake section fills the TX-specific items — TX's terms list (item 8
-  a-n) is its own, distinct from CA's and WA's. See `APPLICATION_coverage.md`.
+  a-n) is its own, distinct from CA's and WA's. See `coverage.md`.
 - "Keep information confidential" (item 14) defaults to a recommended **yes** in
   intake — survivors usually want their address off the public order.
 - Drop the official blank fillable PDFs here for lea-be-core's renderer. Source:

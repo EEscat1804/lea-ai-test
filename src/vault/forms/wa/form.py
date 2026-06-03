@@ -12,7 +12,7 @@ request, length, jurisdiction basis, and so on. WA's restraint list is its
 own, distinct from CA's relief set.
 
 Same contract as the other form modules (see `_base`): never renders a PDF,
-never guesses, flags attorney-review mappings. See PO-001_coverage.md.
+never guesses, flags attorney-review mappings. See coverage.md.
 
 Owners: Pranav, Aaron.
 """

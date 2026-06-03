@@ -25,7 +25,7 @@ from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
-SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA"}
+SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA"}
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
 HANDOFF_JURISDICTIONS = {"AZ", "IL", "KS", "NJ"}
@@ -715,7 +715,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     # respondent identity (2b-2e), marriage status (3c), extra incidents (6-7),
     # protected-people detail (8), and the orders requested (10-28) with their
     # details. CA only today (the jurisdiction with petition mapping in
-    # vault.forms.ca_dv100); other states follow when their form module lands.
+    # vault.forms.ca); other states follow when their form module lands.
     if jurisdiction == "CA":
         # Respondent identity (items 2b-2e) — the form asks, Tier-1 didn't.
         if "respondent.age" not in answers:
@@ -932,7 +932,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
 
     # Washington PO 001 — WA-specific fields (items 3, 9, 12-17, 19-24). WA's
     # restraints (item 14) are its own list, distinct from CA's relief set. Maps
-    # in vault.forms.wa_po001. CA's analogous block is gated above; this is WA's.
+    # in vault.forms.wa. CA's analogous block is gated above; this is WA's.
     if jurisdiction == "WA":
         if "respondent.dob" not in answers:
             return {
@@ -1131,7 +1131,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
 
     # Virginia DC-383 — VA-specific fields: respondent description (DOB/race/sex),
     # the preliminary-order request, and the conditions requested. Maps in
-    # vault.forms.va_dc383. DC-383 is a simpler form than CA's or WA's.
+    # vault.forms.va. DC-383 is a simpler form than CA's or WA's.
     if jurisdiction == "VA":
         if "respondent.dob" not in answers:
             return {
@@ -1201,7 +1201,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     # Texas Application for Protective Order — TX's terms-and-conditions section
     # (item 8 a-n) plus ex parte, confidentiality, support, and children orders.
     # TX's terms are its own list, distinct from CA's and WA's. Maps in
-    # vault.forms.tx_app.
+    # vault.forms.tx.
     if jurisdiction == "TX":
         if "tx.terms" not in answers:
             return {
@@ -1345,6 +1345,94 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     "private? Most people in your situation do — I'd suggest yes."
                 ),
                 "schema": {"type": "boolean"},
+            }
+
+    # Pennsylvania Petition for Protection from Abuse (PFA) — defendant
+    # identifiers and PA's A-P relief list. Maps in vault.forms.pa_pfa.
+    if jurisdiction == "PA":
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": (
+                    "The Pennsylvania form has a defendant description box. Their race, "
+                    "if you know it — or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "And their sex/gender, if you know — or skip.",
+                "schema": {"type": "string"},
+            }
+        if "pa.relief" not in answers:
+            return {
+                "step": "pa.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "restrain_abuse",  # A
+                            "evict",  # B
+                            "other_housing",  # C
+                            "custody",  # D
+                            "no_contact",  # E
+                            "no_contact_family",  # F
+                            "relinquish_firearms",  # G
+                            "prohibit_firearms",  # H
+                            "support",  # I
+                            "financial_losses",  # J
+                            "pay_costs",  # K
+                            "attorney_fees",  # L
+                            "other",  # M
+                            "court_discretion",  # N
+                            "police_serve",  # O
+                            "police_escort",  # P
+                        ],
+                    },
+                },
+            }
+        pa_relief = answers.get("pa.relief", [])
+        if "evict" in pa_relief and "pa.evict_residence" not in answers:
+            return {
+                "step": "pa.evict_residence",
+                "prompt": "For the eviction order — what's the address of the home?",
+                "schema": {"type": "string"},
+            }
+        if "custody" in pa_relief and "pa.custody_restrictions" not in answers:
+            return {
+                "step": "pa.custody_restrictions",
+                "prompt": (
+                    "For temporary custody — any limits you want on the other parent's "
+                    "contact with the children? You can describe, or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "financial_losses" in pa_relief and "pa.financial_losses" not in answers:
+            return {
+                "step": "pa.financial_losses",
+                "prompt": (
+                    "What out-of-pocket losses did the abuse cause? List them with "
+                    "amounts if you know."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "other" in pa_relief and "pa.other_relief" not in answers:
+            return {
+                "step": "pa.other_relief",
+                "prompt": "What other relief would you like the judge to consider?",
+                "schema": {"type": "string"},
             }
 
     requested_reliefs = answers.get("selected_reliefs_intents", [])

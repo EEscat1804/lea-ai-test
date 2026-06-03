@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from vault.forms import ca_dv100
+from vault.forms import ca
 from vault.petition import (
     assemble_petition,
     handle_petition_request,
@@ -233,7 +233,7 @@ def test_review_items_surface_for_attorney():
 
 
 def test_ca_field_table_items_are_unique():
-    items = [f.item for f in ca_dv100.CA_DV100_FIELDS]
+    items = [f.item for f in ca.CA_DV100_FIELDS]
     assert len(items) == len(set(items))
 
 
@@ -300,9 +300,9 @@ def test_wa_missing_required_is_fact_needed():
 
 
 def test_wa_field_table_items_are_unique():
-    from vault.forms import wa_po001
+    from vault.forms import wa
 
-    items = [f.item for f in wa_po001.WA_PO001_FIELDS]
+    items = [f.item for f in wa.WA_PO001_FIELDS]
     assert len(items) == len(set(items))
 
 
@@ -354,9 +354,9 @@ def test_va_missing_required_is_fact_needed():
 
 
 def test_va_field_table_items_are_unique():
-    from vault.forms import va_dc383
+    from vault.forms import va
 
-    items = [f.item for f in va_dc383.VA_DC383_FIELDS]
+    items = [f.item for f in va.VA_DC383_FIELDS]
     assert len(items) == len(set(items))
 
 
@@ -408,9 +408,57 @@ def test_tx_missing_required_is_fact_needed():
 
 
 def test_tx_field_table_items_are_unique():
-    from vault.forms import tx_app
+    from vault.forms import tx
 
-    items = [f.item for f in tx_app.TX_APO_FIELDS]
+    items = [f.item for f in tx.TX_APO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Pennsylvania Petition for Protection from Abuse ---
+
+
+def test_pa_is_supported_and_metadata():
+    assert "PA" in supported_jurisdictions()
+    out = assemble_petition("PA", _CA_ANSWERS)
+    assert out["form"] == "PA-PFA"
+    assert out["jurisdiction"] == "PA"
+
+
+def test_pa_maps_core_fields():
+    fields = assemble_petition("PA", _CA_ANSWERS)["fields"]
+    assert fields["1_plaintiff"]["value"] == "Jane Doe"
+    assert fields["2_defendant"]["value"] == "John Roe"
+    assert fields["3_on_behalf"]["value"] == "myself"
+    assert fields["15_immediate_danger"]["value"] == "checked"
+    assert fields["11_incident_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_pa_relief_checks_their_boxes():
+    answers = {**_CA_ANSWERS, "pa.relief": ["restrain_abuse", "relinquish_firearms"]}
+    fields = assemble_petition("PA", answers)["fields"]
+    assert fields["relief_a"]["value"] == "checked"  # restrain_abuse
+    assert fields["relief_g"]["value"] == "checked"  # relinquish_firearms
+    assert fields["relief_e"]["status"] == "not_collected"  # no_contact not selected
+
+
+def test_pa_evict_detail_maps():
+    answers = {**_CA_ANSWERS, "pa.relief": ["evict"], "pa.evict_residence": "5 Pine St"}
+    fields = assemble_petition("PA", answers)["fields"]
+    assert fields["relief_b"]["value"] == "checked"
+    assert fields["relief_b_residence"]["value"] == "5 Pine St"
+
+
+def test_pa_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("PA", answers)
+    assert out["fields"]["1_plaintiff"]["value"] == "[FACT NEEDED]"
+    assert "1_plaintiff" in out["gaps"]
+
+
+def test_pa_field_table_items_are_unique():
+    from vault.forms import pa
+
+    items = [f.item for f in pa.PA_PFA_FIELDS]
     assert len(items) == len(set(items))
 
 
