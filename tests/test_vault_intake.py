@@ -415,6 +415,29 @@ def test_pa_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_NY_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "petitioner.interpreter_language": "English",
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+    "respondent.is_law_enforcement": False,
+    "respondent.prior_criminal_history": False,
+}
+
+
+def test_ny_asks_county_then_relief() -> None:
+    step = determine_next_step("NY", _NY_THROUGH_TIER2)
+    assert step["step"] == "ny.county"
+    step = determine_next_step("NY", {**_NY_THROUGH_TIER2, "ny.county": "Kings"})
+    assert step["step"] == "ny.relief"
+    assert "surrender_firearms" in step["schema"]["items"]["enum"]
+
+
+def test_ny_reaches_done_when_fully_answered() -> None:
+    answers = {**_NY_THROUGH_TIER2, "ny.county": "Kings", "ny.relief": ["stay_away", "no_contact"]}
+    step = determine_next_step("NY", answers)
+    assert step["step"] == "done"
+
+
 def test_nc_asks_county_then_relief() -> None:
     base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
             "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}

@@ -1524,6 +1524,44 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "schema": {"type": "string"},
             }
 
+    # New York Family Offense Petition (UCS-FC8-2, FCA 821) — county and the
+    # item-10 relief list. The offense checklist (item 4) is a legal
+    # characterization left to the attorney, not collected here. Maps in
+    # vault.forms.ny.
+    if jurisdiction == "NY":
+        if "ny.county" not in answers:
+            return {
+                "step": "ny.county",
+                "prompt": "Which New York county is the Family Court in?",
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "ny.relief" not in answers:
+            return {
+                "step": "ny.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "stay_away",  # stay away from petitioner
+                            "stay_away_home",  # stay away from home
+                            "stay_away_work",  # stay away from workplace
+                            "no_offense",  # do not menace/harass/assault
+                            "no_contact",  # no communication / social media
+                            "no_third_party",  # no third-party contact
+                            "surrender_firearms",  # surrender firearms
+                            "aggravated",  # finding of aggravated circumstances
+                            "child_support",  # temporary child support
+                            "spousal_support",  # temporary spousal support
+                        ],
+                    },
+                },
+            }
+
     requested_reliefs = answers.get("selected_reliefs_intents", [])
     if (
         jurisdiction in {"CA", "FL", "TX"}

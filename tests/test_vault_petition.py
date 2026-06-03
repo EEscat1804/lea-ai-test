@@ -38,8 +38,9 @@ _CA_ANSWERS = {
 
 def test_dispatch_unsupported_jurisdiction_raises():
     # A state without a forms module must fail loudly, not return an empty form.
+    # FL is in the intake set but has no form package yet — a real example.
     with pytest.raises(NotImplementedError):
-        assemble_petition("NY", _CA_ANSWERS)
+        assemble_petition("FL", _CA_ANSWERS)
 
 
 def test_ca_is_supported():
@@ -515,6 +516,61 @@ def test_nc_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- New York Family Offense Petition ---
+
+
+def test_ny_is_supported_and_metadata():
+    assert "NY" in supported_jurisdictions()
+    out = assemble_petition("NY", {**_CA_ANSWERS, "ny.county": "Kings"})
+    assert out["form"] == "UCS-FC8-2"
+    assert out["jurisdiction"] == "NY"
+
+
+def test_ny_maps_core_fields_and_confidential_default():
+    fields = assemble_petition("NY", {**_CA_ANSWERS, "ny.county": "Kings"})["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["4_narrative"]["value"].startswith("He grabbed my phone")
+    # Address confidentiality defaults to Yes — a protection-minded default.
+    assert fields["1_address_confidential"]["value"] == "Yes"
+
+
+def test_ny_offense_checklist_is_left_to_attorney():
+    # Item 4 offense classification is legal characterization — not guessed.
+    fields = assemble_petition("NY", {**_CA_ANSWERS, "ny.county": "Kings"})["fields"]
+    assert fields["4_offenses"]["status"] == "not_collected"
+    assert "4_offenses" in assemble_petition("NY", {**_CA_ANSWERS, "ny.county": "Kings"})[
+        "review_items"
+    ]
+
+
+def test_ny_relief_and_order_of_protection_derived():
+    answers = {
+        **_CA_ANSWERS,
+        "ny.county": "Kings",
+        "ny.relief": ["stay_away", "surrender_firearms"],
+    }
+    fields = assemble_petition("NY", answers)["fields"]
+    assert fields["r_stay_away"]["value"] == "checked"
+    assert fields["r_surrender"]["value"] == "checked"
+    assert fields["r_no_contact"]["status"] == "not_collected"
+    # The parent "order of protection" box checks when any condition is requested.
+    assert fields["10b_order_protection"]["value"] == "checked"
+
+
+def test_ny_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NY", {**answers, "ny.county": "Kings"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ny_field_table_items_are_unique():
+    from vault.forms import ny
+
+    items = [f.item for f in ny.NY_FOP_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 
@@ -529,7 +585,7 @@ def test_handler_returns_assembled_form():
 
 
 def test_handler_rejects_unsupported_jurisdiction():
-    resp = asyncio.run(handle_petition_request({"jurisdiction": "NY", "answers": {}}, env=None))
+    resp = asyncio.run(handle_petition_request({"jurisdiction": "FL", "answers": {}}, env=None))
     assert resp["status"] == 400
     assert json.loads(resp["body"])["code"] == "unsupported_jurisdiction"
 
