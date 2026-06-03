@@ -25,7 +25,7 @@ from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
-SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA"}
+SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC"}
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
 HANDOFF_JURISDICTIONS = {"AZ", "IL", "KS", "NJ"}
@@ -536,7 +536,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         }
 
     if (
-        jurisdiction in {"CA", "NY", "TX", "FL", "WA"}
+        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC"}
         and "petitioner.interpreter_language" not in answers
     ):
         return {
@@ -1431,6 +1431,95 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         if "other" in pa_relief and "pa.other_relief" not in answers:
             return {
                 "step": "pa.other_relief",
+                "prompt": "What other relief would you like the judge to consider?",
+                "schema": {"type": "string"},
+            }
+
+    # North Carolina Complaint for DV Protective Order (AOC-CV-303, G.S. 50B) —
+    # county of residence and NC's 1-17 relief list. Maps in vault.forms.nc.
+    if jurisdiction == "NC":
+        if "nc.county" not in answers:
+            return {
+                "step": "nc.county",
+                "prompt": "Which North Carolina county do you live in?",
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "nc.relief" not in answers:
+            return {
+                "step": "nc.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "emergency",  # 1
+                            "ex_parte",  # 2
+                            "no_abuse",  # 3
+                            "no_pet_abuse",  # 3a
+                            "residence",  # 4
+                            "eviction",  # 5
+                            "personal_property",  # 6
+                            "pet_custody",  # 6a
+                            "stay_away",  # 7
+                            "no_contact",  # 8
+                            "vehicle",  # 9
+                            "custody",  # 10
+                            "child_support",  # 11
+                            "prohibit_firearm",  # 12
+                            "surrender_firearms",  # 13
+                            "abuser_program",  # 14
+                            "alternative_housing",  # 15
+                            "spousal_support",  # 16
+                            "other",  # 17
+                        ],
+                    },
+                },
+            }
+        nc_relief = answers.get("nc.relief", [])
+        if (
+            "residence" in nc_relief or "eviction" in nc_relief
+        ) and "nc.residence_address" not in answers:
+            return {
+                "step": "nc.residence_address",
+                "prompt": "What's the address of the home?",
+                "schema": {"type": "string"},
+            }
+        if "stay_away" in nc_relief and "nc.stay_away_places" not in answers:
+            return {
+                "step": "nc.stay_away_places",
+                "prompt": (
+                    "Which places should they be ordered to stay away from? Home, a "
+                    "shelter, your work, the kids' school, daycare, your school? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "residence",
+                            "shelter",
+                            "work",
+                            "childrens_school",
+                            "daycare",
+                            "my_school",
+                            "other",
+                        ],
+                    },
+                },
+            }
+        if "vehicle" in nc_relief and "nc.vehicle" not in answers:
+            return {
+                "step": "nc.vehicle",
+                "prompt": "Which vehicle do you need? A description is enough.",
+                "schema": {"type": "string"},
+            }
+        if "other" in nc_relief and "nc.other_relief" not in answers:
+            return {
+                "step": "nc.other_relief",
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }

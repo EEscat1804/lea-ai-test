@@ -462,6 +462,59 @@ def test_pa_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- North Carolina Complaint for DV Protective Order ---
+
+
+def test_nc_is_supported_and_metadata():
+    assert "NC" in supported_jurisdictions()
+    out = assemble_petition("NC", {**_CA_ANSWERS, "nc.county": "Wake"})
+    assert out["form"] == "AOC-CV-303"
+    assert out["jurisdiction"] == "NC"
+
+
+def test_nc_maps_core_fields():
+    fields = assemble_petition("NC", {**_CA_ANSWERS, "nc.county": "Wake"})["fields"]
+    assert fields["plaintiff"]["value"] == "Jane Doe"
+    assert fields["defendant"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Wake"
+    assert fields["2_acts_in_nc"]["value"] == "checked"
+    assert fields["5_abuse_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_nc_relief_checks_their_boxes():
+    answers = {**_CA_ANSWERS, "nc.county": "Wake", "nc.relief": ["no_abuse", "surrender_firearms"]}
+    fields = assemble_petition("NC", answers)["fields"]
+    assert fields["r3"]["value"] == "checked"  # no_abuse
+    assert fields["r13"]["value"] == "checked"  # surrender_firearms
+    assert fields["r8"]["status"] == "not_collected"  # no_contact not selected
+
+
+def test_nc_relief_detail_maps():
+    answers = {
+        **_CA_ANSWERS, "nc.county": "Wake",
+        "nc.relief": ["stay_away", "vehicle"],
+        "nc.stay_away_places": ["residence", "work"],
+        "nc.vehicle": "blue sedan",
+    }
+    fields = assemble_petition("NC", answers)["fields"]
+    assert fields["r7_places"]["value"] == ["residence", "work"]
+    assert fields["r9_vehicle"]["value"] == "blue sedan"
+
+
+def test_nc_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NC", {**answers, "nc.county": "Wake"})
+    assert out["fields"]["plaintiff"]["value"] == "[FACT NEEDED]"
+    assert "plaintiff" in out["gaps"]
+
+
+def test_nc_field_table_items_are_unique():
+    from vault.forms import nc
+
+    items = [f.item for f in nc.NC_AOC303_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 

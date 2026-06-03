@@ -415,6 +415,32 @@ def test_pa_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+def test_nc_asks_county_then_relief() -> None:
+    base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
+            "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}
+    step = determine_next_step("NC", base)
+    assert step["step"] == "nc.county"
+    step = determine_next_step("NC", {**base, "nc.county": "Wake"})
+    assert step["step"] == "nc.relief"
+    assert "surrender_firearms" in step["schema"]["items"]["enum"]
+
+
+def test_nc_stay_away_follow_up() -> None:
+    answers = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
+               "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+               "nc.county": "Wake", "nc.relief": ["stay_away"]}
+    step = determine_next_step("NC", answers)
+    assert step["step"] == "nc.stay_away_places"
+
+
+def test_nc_reaches_done_when_fully_answered() -> None:
+    answers = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
+               "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+               "nc.county": "Wake", "nc.relief": ["no_abuse", "no_contact"]}
+    step = determine_next_step("NC", answers)
+    assert step["step"] == "done"
+
+
 def test_va_is_accepted_and_asks_conditions() -> None:
     # VA walks Tier-1 + physical/employer/vehicle + the VA respondent-description
     # questions, then asks which conditions to request.
