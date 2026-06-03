@@ -571,6 +571,61 @@ def test_ny_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- Massachusetts Chapter 209A Complaint ---
+
+
+def test_ma_is_supported_and_metadata():
+    assert "MA" in supported_jurisdictions()
+    out = assemble_petition("MA", _CA_ANSWERS)
+    assert out["form"] == "TC0061-209A"
+    assert out["jurisdiction"] == "MA"
+
+
+def test_ma_maps_core_and_defendant_info():
+    answers = {**_CA_ANSWERS, "respondent.height": "6ft", "respondent.gender": "male"}
+    fields = assemble_petition("MA", answers)["fields"]
+    assert fields["c_plaintiff"]["value"] == "Jane Doe"
+    assert fields["aff_narrative"]["value"].startswith("He grabbed my phone")
+    assert fields["dif_height"]["value"] == "6ft"
+    assert fields["dif_sex"]["value"] == "male"
+
+
+def test_ma_plaintiff_home_address_never_collected():
+    # Protection by design: the survivor's home address is never collected, so it
+    # cannot reach the (public) complaint.
+    fields = assemble_petition("MA", _CA_ANSWERS)["fields"]
+    assert fields["pci_home_address"]["status"] == "not_collected"
+    assert fields["pci_home_address"]["value"] is None
+
+
+def test_ma_abuse_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "ma.abuse_types": ["physical_harm", "fear_imminent"],
+        "ma.relief": ["stop_abusing", "address_off_home"],
+    }
+    fields = assemble_petition("MA", answers)["fields"]
+    assert fields["ab_physical_harm"]["value"] == "checked"
+    assert fields["ab_fear_imminent"]["value"] == "checked"
+    assert fields["ab_sexual_coercion"]["status"] == "not_collected"
+    assert fields["r_stop_abusing"]["value"] == "checked"
+    assert fields["r_address_off_home"]["value"] == "checked"
+
+
+def test_ma_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MA", answers)
+    assert out["fields"]["c_plaintiff"]["value"] == "[FACT NEEDED]"
+    assert "c_plaintiff" in out["gaps"]
+
+
+def test_ma_field_table_items_are_unique():
+    from vault.forms import ma
+
+    items = [f.item for f in ma.MA_209A_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 

@@ -25,7 +25,7 @@ from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
-SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC"}
+SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA"}
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
 HANDOFF_JURISDICTIONS = {"AZ", "IL", "KS", "NJ"}
@@ -536,7 +536,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         }
 
     if (
-        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC"}
+        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC", "MA"}
         and "petitioner.interpreter_language" not in answers
     ):
         return {
@@ -1560,6 +1560,128 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                         ],
                     },
                 },
+            }
+
+    # Massachusetts Chapter 209A Complaint for Protection from Abuse — defendant
+    # identifiers (for the Defendant Information Form), the nature-of-abuse boxes,
+    # and the request-for-relief list (which includes keeping the survivor's
+    # address off the order). Maps in vault.forms.ma.
+    if jurisdiction == "MA":
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": (
+                    "The defendant information form has a description box. Their race, "
+                    "if you know it — or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "And their sex/gender, if you know — or skip.",
+                "schema": {"type": "string"},
+            }
+        if "ma.abuse_types" not in answers:
+            return {
+                "step": "ma.abuse_types",
+                "prompt": (
+                    "Which of these describe what happened? Pick any that fit — "
+                    "you can choose more than one."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "physical_harm",  # caused physical harm
+                            "attempted_harm",  # attempted to cause physical harm
+                            "fear_imminent",  # placed me in fear of imminent serious harm
+                            "sexual_coercion",  # sexual relations by force/threat/duress
+                            "coercive_control_child",  # harming a child/relative
+                            "coercive_control_animal",  # abusing an animal
+                            "coercive_control_images",  # publishing explicit images
+                            "coercive_control_pattern",  # pattern of coercive behavior
+                        ],
+                    },
+                },
+            }
+        if "ma.relief" not in answers:
+            return {
+                "step": "ma.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits. "
+                    "If they're ordered to stay away from your home, work, or school, "
+                    "those addresses can show on the order — you can also ask to keep "
+                    "each one off it, and I'd suggest doing that."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "stop_abusing",  # stop abusing me
+                            "no_contact",  # no contact at all
+                            "no_contact_except",  # no contact except as authorized
+                            "leave_residence",  # leave/stay away from residence
+                            "leave_workplace",  # leave/stay away from workplace
+                            "leave_school",  # leave/stay away from school
+                            "address_off_home",  # keep home address off the order
+                            "address_off_work",  # keep work address off the order
+                            "address_off_school",  # keep school address off the order
+                            "compensation",  # pay compensation for losses
+                            "child_support_alimony",  # temporary support/alimony
+                            "custody",  # custody of children
+                            "no_contact_children",  # no contact with children
+                            "stay_away_children_school",  # stay away from children's school
+                            "animal_protection",  # protect an animal
+                            "animal_possession",  # possession of an animal
+                            "other",  # other relief
+                        ],
+                    },
+                },
+            }
+        ma_relief = answers.get("ma.relief", [])
+        if "no_contact_except" in ma_relief and "ma.contact_methods" not in answers:
+            return {
+                "step": "ma.contact_methods",
+                "prompt": (
+                    "Which kinds of contact would be okay, if any? Phone, text, email, "
+                    "or something else?"
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["phone", "text", "email", "other"]},
+                },
+            }
+        if "compensation" in ma_relief and "ma.compensation" not in answers:
+            return {
+                "step": "ma.compensation",
+                "prompt": (
+                    "What losses did the abuse cause that you'd want paid back? "
+                    "List them with amounts if you know."
+                ),
+                "schema": {"type": "string"},
+            }
+        if (
+            "animal_protection" in ma_relief or "animal_possession" in ma_relief
+        ) and "ma.animals" not in answers:
+            return {
+                "step": "ma.animals",
+                "prompt": "Which animal(s)? A name and type is enough.",
+                "schema": {"type": "string"},
+            }
+        if "other" in ma_relief and "ma.other_relief" not in answers:
+            return {
+                "step": "ma.other_relief",
+                "prompt": "What other order would you like the judge to consider?",
+                "schema": {"type": "string"},
             }
 
     requested_reliefs = answers.get("selected_reliefs_intents", [])

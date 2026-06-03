@@ -438,6 +438,41 @@ def test_ny_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_MA_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "petitioner.interpreter_language": "English",
+    "respondent.height": "6'0", "respondent.weight": "180", "respondent.eye_color": "Brown",
+    "respondent.hair_color": "Black", "respondent.distinguishing_marks": "None",
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+    "respondent.vehicle_make_model": "Sedan", "respondent.vehicle_color": "Blue",
+    "respondent.vehicle_plate": "ABC123",
+    "respondent.dob": "1988-02-02", "respondent.race": "n/a", "respondent.gender": "male",
+}
+
+
+def test_ma_asks_abuse_then_relief() -> None:
+    step = determine_next_step("MA", _MA_THROUGH_TIER2)
+    assert step["step"] == "ma.abuse_types"
+    answered = {**_MA_THROUGH_TIER2, "ma.abuse_types": ["physical_harm"]}
+    step = determine_next_step("MA", answered)
+    assert step["step"] == "ma.relief"
+    assert "address_off_home" in step["schema"]["items"]["enum"]
+
+
+def test_ma_compensation_follow_up() -> None:
+    answers = {**_MA_THROUGH_TIER2, "ma.abuse_types": ["physical_harm"],
+               "ma.relief": ["compensation"]}
+    step = determine_next_step("MA", answers)
+    assert step["step"] == "ma.compensation"
+
+
+def test_ma_reaches_done_when_fully_answered() -> None:
+    answers = {**_MA_THROUGH_TIER2, "ma.abuse_types": ["physical_harm"],
+               "ma.relief": ["stop_abusing", "no_contact", "address_off_home"]}
+    step = determine_next_step("MA", answers)
+    assert step["step"] == "done"
+
+
 def test_nc_asks_county_then_relief() -> None:
     base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
             "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}
