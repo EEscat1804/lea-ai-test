@@ -503,6 +503,37 @@ def test_md_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_HI_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+}
+
+
+def test_hi_asks_abuse_then_harm_then_relief() -> None:
+    step = determine_next_step("HI", _HI_THROUGH_TIER2)
+    assert step["step"] == "hi.abuse_acts"
+    a = {**_HI_THROUGH_TIER2, "hi.abuse_acts": ["choke"]}
+    step = determine_next_step("HI", a)
+    assert step["step"] == "hi.harm_types"
+    a = {**a, "hi.harm_types": ["physical_harm"]}
+    step = determine_next_step("HI", a)
+    assert step["step"] == "hi.relief"
+    assert "dv_intervention" in step["schema"]["items"]["enum"]
+
+
+def test_hi_abuse_other_follow_up() -> None:
+    answers = {**_HI_THROUGH_TIER2, "hi.abuse_acts": ["other"]}
+    step = determine_next_step("HI", answers)
+    assert step["step"] == "hi.abuse_other"
+
+
+def test_hi_reaches_done_when_fully_answered() -> None:
+    answers = {**_HI_THROUGH_TIER2, "hi.abuse_acts": ["choke"], "hi.harm_types": ["physical_harm"],
+               "hi.relief": ["no_contact", "vacate"], "hi.duration": "1 year"}
+    step = determine_next_step("HI", answers)
+    assert step["step"] == "done"
+
+
 def test_nc_asks_county_then_relief() -> None:
     base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
             "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}

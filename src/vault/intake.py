@@ -25,7 +25,9 @@ from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
-SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD"}
+SUPPORTED_JURISDICTIONS = {
+    "CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD", "HI",
+}
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
 HANDOFF_JURISDICTIONS = {"AZ", "IL", "KS", "NJ"}
@@ -1813,6 +1815,102 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
             return {
                 "step": "md.other_relief",
                 "prompt": "What other order would you like the judge to consider?",
+                "schema": {"type": "string"},
+            }
+
+    # Hawai'i Petition for an Order for Protection (1F-P-752A, HRS ch. 586) —
+    # the acts-of-abuse checklist, the harm-type classification, the section II
+    # relief requests, and order duration. Maps in vault.forms.hi.
+    if jurisdiction == "HI":
+        if "hi.abuse_acts" not in answers:
+            return {
+                "step": "hi.abuse_acts",
+                "prompt": (
+                    "Which of these describe what they did (or threatened)? Pick any "
+                    "that fit — you can choose more than one."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "choke",
+                            "force_sex",
+                            "grab",
+                            "hit",
+                            "kick",
+                            "slap",
+                            "punch",
+                            "push",
+                            "shove",
+                            "other",
+                        ],
+                    },
+                },
+            }
+        if "other" in answers.get("hi.abuse_acts", []) and "hi.abuse_other" not in answers:
+            return {
+                "step": "hi.abuse_other",
+                "prompt": "You picked 'other' — can you say what happened in a few words?",
+                "schema": {"type": "string"},
+            }
+        if "hi.harm_types" not in answers:
+            return {
+                "step": "hi.harm_types",
+                "prompt": (
+                    "And how would you describe the harm? Pick any that fit — physical "
+                    "harm, a threat of harm, psychological abuse, property damage, or a "
+                    "pattern of control."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "physical_harm",
+                            "threat_imminent",
+                            "psychological",
+                            "property_damage",
+                            "coercive_control",
+                        ],
+                    },
+                },
+            }
+        if "hi.relief" not in answers:
+            return {
+                "step": "hi.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_contact",  # no contact / threaten / abuse
+                            "no_residence",  # not enter/visit residence
+                            "no_property_damage",  # no property damage
+                            "no_psych_abuse",  # no psychological abuse
+                            "no_contact_work",  # no contact at workplace
+                            "no_contact_children_school",  # no contact at children's school
+                            "protect_animals",  # protect animals
+                            "vacate",  # vacate residence
+                            "custody_visitation",  # temporary custody/visitation
+                            "no_visitation",  # prohibit visitation
+                            "supervised_visitation",  # supervised visitation
+                            "dv_intervention",  # DV intervention services
+                        ],
+                    },
+                },
+            }
+        if "hi.duration" not in answers:
+            return {
+                "step": "hi.duration",
+                "prompt": (
+                    "How long should the protective order last? You can say something "
+                    "like '6 months' or '1 year' — the judge can adjust it."
+                ),
                 "schema": {"type": "string"},
             }
 

@@ -679,6 +679,55 @@ def test_md_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- Hawai'i Petition for an Order for Protection ---
+
+
+def test_hi_is_supported_and_metadata():
+    assert "HI" in supported_jurisdictions()
+    out = assemble_petition("HI", _CA_ANSWERS)
+    assert out["form"] == "1F-P-752A"
+    assert out["jurisdiction"] == "HI"
+
+
+def test_hi_maps_core_and_age_band():
+    fields = assemble_petition("HI", _CA_ANSWERS)["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["6_narrative"]["value"].startswith("He grabbed my phone")
+    assert fields["self_represented"]["value"] == "checked"
+    # DOB 1990 => adult
+    assert fields["2_age_band"]["value"] == "adult_18_or_older"
+
+
+def test_hi_abuse_harm_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "hi.abuse_acts": ["choke", "punch"],
+        "hi.harm_types": ["physical_harm", "coercive_control"],
+        "hi.relief": ["no_contact", "vacate"],
+    }
+    fields = assemble_petition("HI", answers)["fields"]
+    assert fields["ab_choke"]["value"] == "checked"
+    assert fields["ab_punch"]["value"] == "checked"
+    assert fields["ab_grab"]["status"] == "not_collected"
+    assert fields["harm_coercive"]["value"] == "checked"
+    assert fields["r_no_contact"]["value"] == "checked"
+    assert fields["r_vacate"]["value"] == "checked"
+
+
+def test_hi_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("HI", answers)
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_hi_field_table_items_are_unique():
+    from vault.forms import hi
+
+    items = [f.item for f in hi.HI_FOP_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 
