@@ -1,23 +1,73 @@
 """Vault petition assembly.
 
 Takes a completed intake (jurisdiction + answers) and produces the
-court-ready DVRO petition for that jurisdiction. Each jurisdiction has
-its own forms (CA: DV-100/DV-110, etc.) — those templates live under
-`templates/<jurisdiction>/` (to be added by the team).
+court-ready DVRO petition mapping for that jurisdiction. Each jurisdiction
+has its own form(s) (CA: DV-100/DV-110, etc.); the per-jurisdiction mappings
+live in `vault.forms.*`.
 
-This module is intentionally empty in v0.1.0 — Pranav + Aaron will land
-the first jurisdiction (CA) as the reference implementation, then
-broaden to the remaining 46.
+CA (DV-100) is the reference implementation. Other jurisdictions land the
+same way: add a `vault.forms.<state>` module and dispatch to it here.
+
+This module returns a structured field map, not a PDF — lea-be-core renders
+it onto the official fillable form. See `vault.forms.ca_dv100` for the
+contract and the marker discipline (`[FACT NEEDED]`, review flags).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
+
+from lib.responses import json_response, problem_response
+from vault.forms import ca_dv100, tx_app, va_dc383, wa_po001
+
+# jurisdiction -> assembler. Add a state here when its forms module lands.
+_ASSEMBLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "CA": ca_dv100.assemble,
+    "WA": wa_po001.assemble,
+    "VA": va_dc383.assemble,
+    "TX": tx_app.assemble,
+}
+
+
+def supported_jurisdictions() -> frozenset[str]:
+    """Jurisdictions with a petition assembler wired up today."""
+    return frozenset(_ASSEMBLERS)
 
 
 def assemble_petition(jurisdiction: str, answers: dict[str, Any]) -> dict[str, Any]:
-    """Return the assembled petition for a jurisdiction.
+    """Return the assembled petition mapping for a jurisdiction.
 
-    Not wired into routes yet; called once intake is complete.
+    Called once intake reports `done`. Raises NotImplementedError for a
+    jurisdiction whose form module has not landed yet, so a missing state is a
+    loud failure rather than a silently empty form.
     """
-    raise NotImplementedError("petition assembly lands with the first jurisdiction (CA)")
+    assembler = _ASSEMBLERS.get(jurisdiction)
+    if assembler is None:
+        raise NotImplementedError(
+            f"petition assembly not yet implemented for jurisdiction {jurisdiction!r}; "
+            f"supported: {sorted(_ASSEMBLERS)}"
+        )
+    return assembler(answers)
+
+
+async def handle_petition_request(body: dict[str, Any], env: Any) -> Any:
+    """`POST /v1/vault/petition` — assemble the petition mapping for a finished intake.
+
+    Body: `{ jurisdiction, answers }`. The returned `gaps` list tells lea-be-core
+    whether the form is filing-ready; an empty `gaps` means every required field
+    is present.
+    """
+    jurisdiction = body.get("jurisdiction")
+    answers = body.get("answers", {})
+
+    if jurisdiction not in supported_jurisdictions():
+        return problem_response(
+            400,
+            "unsupported_jurisdiction",
+            f"petition assembly supports {sorted(supported_jurisdictions())}",
+        )
+    if not isinstance(answers, dict):
+        return problem_response(400, "bad_request", "answers must be an object")
+
+    return json_response(assemble_petition(jurisdiction, answers))
