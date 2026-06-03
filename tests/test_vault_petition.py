@@ -626,6 +626,59 @@ def test_ma_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- Maryland Petition for Protection from Domestic Violence ---
+
+
+def test_md_is_supported_and_metadata():
+    assert "MD" in supported_jurisdictions()
+    out = assemble_petition("MD", _CA_ANSWERS)
+    assert out["form"] == "CC-DC-DV-001"
+    assert out["jurisdiction"] == "MD"
+
+
+def test_md_maps_core_and_addendum():
+    answers = {**_CA_ANSWERS, "respondent.gender": "male", "respondent.dob": "1985-01-01"}
+    fields = assemble_petition("MD", answers)["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["2_details"]["value"].startswith("He grabbed my phone")
+    assert fields["petition_dv"]["value"] == "checked"
+    assert fields["add_sex"]["value"] == "male"
+
+
+def test_md_address_confidential_defaults_on():
+    # Protection-minded: the petitioner's address is withheld by default.
+    fields = assemble_petition("MD", _CA_ANSWERS)["fields"]
+    assert fields["address_confidential"]["value"] == "checked"
+
+
+def test_md_abuse_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "md.abuse_acts": ["punching", "choking_strangling"],
+        "md.relief": ["no_abuse", "leave_home"],
+    }
+    fields = assemble_petition("MD", answers)["fields"]
+    assert fields["ab_punching"]["value"] == "checked"
+    assert fields["ab_choking"]["value"] == "checked"
+    assert fields["ab_stabbing"]["status"] == "not_collected"
+    assert fields["r_no_abuse"]["value"] == "checked"
+    assert fields["r_leave_home"]["value"] == "checked"
+
+
+def test_md_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MD", answers)
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_md_field_table_items_are_unique():
+    from vault.forms import md
+
+    items = [f.item for f in md.MD_DV001_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 

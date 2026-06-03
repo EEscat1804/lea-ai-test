@@ -25,7 +25,7 @@ from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
 # Jurisdictions supported for the full Petition process
-SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA"}
+SUPPORTED_JURISDICTIONS = {"CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD"}
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
 HANDOFF_JURISDICTIONS = {"AZ", "IL", "KS", "NJ"}
@@ -536,7 +536,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         }
 
     if (
-        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC", "MA"}
+        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC", "MA", "MD"}
         and "petitioner.interpreter_language" not in answers
     ):
         return {
@@ -1680,6 +1680,138 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
         if "other" in ma_relief and "ma.other_relief" not in answers:
             return {
                 "step": "ma.other_relief",
+                "prompt": "What other order would you like the judge to consider?",
+                "schema": {"type": "string"},
+            }
+
+    # Maryland Petition for Protection from Domestic Violence (CC-DC-DV-001,
+    # FL § 4-504) — respondent description (for the CC-DC-DV-001A addendum), the
+    # acts-of-abuse checklist, and the relief list. Maps in vault.forms.md.
+    if jurisdiction == "MD":
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": (
+                    "Maryland has a description addendum. Their race, if you know it "
+                    "— or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "And their sex/gender, if you know — or skip.",
+                "schema": {"type": "string"},
+            }
+        if "md.abuse_acts" not in answers:
+            return {
+                "step": "md.abuse_acts",
+                "prompt": (
+                    "Which of these describe what happened? Pick any that fit — "
+                    "you can choose more than one."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "kicking",
+                            "punching",
+                            "choking_strangling",
+                            "slapping",
+                            "shooting",
+                            "rape_sexual",
+                            "hitting_object",
+                            "stabbing",
+                            "shoving",
+                            "threats",
+                            "mental_injury_child",
+                            "detaining",
+                            "stalking",
+                            "biting",
+                            "revenge_porn",
+                            "other",
+                        ],
+                    },
+                },
+            }
+        if "md.relief" not in answers:
+            return {
+                "step": "md.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits. "
+                    "(You don't have to give an address if listing it would put you "
+                    "at more risk.)"
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_abuse",  # not to abuse or threaten
+                            "no_contact",  # not to contact or harass
+                            "stay_away_residence",  # not go to residence
+                            "stay_away_school",  # not go to school
+                            "stay_away_childcare",  # not go to child care
+                            "stay_away_workplace",  # not go to workplace
+                            "leave_home",  # leave the home / possession
+                            "surrender_firearms",  # turn over firearms
+                            "counseling",  # go to counseling
+                            "emergency_maintenance",  # emergency family maintenance
+                            "custody",  # custody of children
+                            "vehicle",  # use/possession of vehicle
+                            "pet_possession",  # temporary possession of pets
+                            "other",  # additional relief
+                        ],
+                    },
+                },
+            }
+        md_relief = answers.get("md.relief", [])
+        if "other" in answers.get("md.abuse_acts", []) and "md.abuse_other" not in answers:
+            return {
+                "step": "md.abuse_other",
+                "prompt": "You picked 'other' — can you say what happened in a few words?",
+                "schema": {"type": "string"},
+            }
+        if "leave_home" in md_relief and "md.home_address" not in answers:
+            return {
+                "step": "md.home_address",
+                "prompt": "What's the address of the home you want them ordered to leave?",
+                "schema": {"type": "string"},
+            }
+        if "counseling" in md_relief and "md.counseling_type" not in answers:
+            return {
+                "step": "md.counseling_type",
+                "prompt": "What kind of counseling — domestic violence, drug/alcohol, or other?",
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["domestic_violence", "drug_alcohol", "other"],
+                    },
+                },
+            }
+        if "vehicle" in md_relief and "md.vehicle" not in answers:
+            return {
+                "step": "md.vehicle",
+                "prompt": "Which vehicle? A description is enough.",
+                "schema": {"type": "string"},
+            }
+        if "pet_possession" in md_relief and "md.pets" not in answers:
+            return {
+                "step": "md.pets",
+                "prompt": "Which pet(s)? A name and type is enough.",
+                "schema": {"type": "string"},
+            }
+        if "other" in md_relief and "md.other_relief" not in answers:
+            return {
+                "step": "md.other_relief",
                 "prompt": "What other order would you like the judge to consider?",
                 "schema": {"type": "string"},
             }

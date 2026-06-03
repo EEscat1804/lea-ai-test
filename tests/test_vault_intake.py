@@ -473,6 +473,36 @@ def test_ma_reaches_done_when_fully_answered() -> None:
     assert step["step"] == "done"
 
 
+_MD_THROUGH_TIER2 = {
+    **_TIER1_COMPLETE,
+    "petitioner.interpreter_language": "English",
+    "respondent.employer_name": "Corp", "respondent.employer_address": "Addr",
+    "respondent.dob": "1988-02-02", "respondent.race": "n/a", "respondent.gender": "male",
+}
+
+
+def test_md_asks_abuse_then_relief() -> None:
+    step = determine_next_step("MD", _MD_THROUGH_TIER2)
+    assert step["step"] == "md.abuse_acts"
+    answered = {**_MD_THROUGH_TIER2, "md.abuse_acts": ["punching"]}
+    step = determine_next_step("MD", answered)
+    assert step["step"] == "md.relief"
+    assert "leave_home" in step["schema"]["items"]["enum"]
+
+
+def test_md_leave_home_follow_up() -> None:
+    answers = {**_MD_THROUGH_TIER2, "md.abuse_acts": ["punching"], "md.relief": ["leave_home"]}
+    step = determine_next_step("MD", answers)
+    assert step["step"] == "md.home_address"
+
+
+def test_md_reaches_done_when_fully_answered() -> None:
+    answers = {**_MD_THROUGH_TIER2, "md.abuse_acts": ["punching"],
+               "md.relief": ["no_abuse", "no_contact"]}
+    step = determine_next_step("MD", answers)
+    assert step["step"] == "done"
+
+
 def test_nc_asks_county_then_relief() -> None:
     base = {**_TIER1_COMPLETE, "petitioner.interpreter_language": "English",
             "respondent.employer_name": "Corp", "respondent.employer_address": "Addr"}
