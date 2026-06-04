@@ -102,24 +102,25 @@ def test_every_manifest_access_step_reaches_the_persona() -> None:
 
 
 def test_quick_exit_location_is_grounded_not_top_of_screen() -> None:
-    # The exact bug: Lea said Quick Exit was at the top. The grounded location is
-    # the right-middle mascot badge — assert that reaches the model.
+    # The exact bug: Lea said Quick Exit was at the top. The grounded badge is on
+    # the right side (movable) — assert that reaches the model and never "top".
     loc = FEATURE_MANIFEST["features"]["quick_exit"]["ui_location"]
     assert loc in DEFAULT_PERSONA
-    assert "right-middle" in loc.lower()
-    # Safety-critical entry is pinned to one anchor, never "top", and never a
-    # left-or-right range (review note): the key direction must be unambiguous.
+    assert "right" in loc.lower()
     assert "top" not in loc.lower()
-    assert " / " not in loc
 
 
-def test_disguise_mode_is_grounded_to_the_eye_toggle() -> None:
-    # Safety feature (shared/monitored device). Ground it to the eye toggle above
-    # Quick Exit, per the in-app tooltip — not a guess, and never "top".
-    loc = FEATURE_MANIFEST["features"]["disguise_mode"]["ui_location"]
-    assert loc in DEFAULT_PERSONA
-    assert "eye" in loc.lower()
-    assert "quick exit" in loc.lower()
+def test_disguise_mode_activation_runs_through_quick_exit_then_eye() -> None:
+    # Safety feature. The verified flow: tap the Quick Exit badge, it expands, then
+    # the EYE icon (not the mascot) turns on Disguise Mode. Lock both the location
+    # and the step order so Lea can't revert to a "separate pinned badge" answer.
+    feat = FEATURE_MANIFEST["features"]["disguise_mode"]
+    assert feat["ui_location"] in DEFAULT_PERSONA
+    assert feat["how_to_access"] in DEFAULT_PERSONA
+    steps = feat["how_to_access"].lower()
+    assert "quick exit" in steps  # step 1 is tapping Quick Exit
+    assert "eye" in steps  # step 2 is the eye icon
+    assert steps.index("quick exit") < steps.index("eye")  # order: Quick Exit -> eye
 
 
 def test_every_feature_is_dated() -> None:

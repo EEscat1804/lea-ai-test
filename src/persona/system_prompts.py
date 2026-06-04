@@ -102,16 +102,19 @@ FEATURE_MANIFEST: FeatureManifest = {
                 "Instantly closes the chat dashboard, clears the conversation from "
                 "view for privacy, and sends you to a safe, neutral webpage."
             ),
-            # Safety-critical entry — pinned to a single anchor, not a range, so the
-            # most important direction is the least ambiguous (review note, 2026-06-03).
+            # Safety-critical, and MOVABLE — the badge can be dragged, so it is honest
+            # to say "right side" rather than a false-precise pin. Tapping it expands
+            # into two icons: the mascot (Quick Exit) and the eye (Disguise Mode).
             "ui_location": (
-                "Floating circular pink mascot badge pinned to the right edge of the "
-                "screen at vertical center (right-middle); it floats above the "
-                "conversation and stays put while scrolling."
+                "A movable, floating circular pink badge labeled 'Quick Exit' on the "
+                "right side of the screen (it can be dragged, and sits around vertical "
+                "center by default). Tapping it expands two icons: a cartoon mascot and "
+                "an eye icon."
             ),
             "how_to_access": (
-                "Tap the Quick Exit badge — it stays on screen the whole time, so "
-                "there's no menu to open first."
+                "Tap the floating 'Quick Exit' badge on the right side, then tap the "
+                "cartoon mascot icon to leave instantly. (The eye icon revealed next to "
+                "it is Disguise Mode, not Quick Exit.)"
             ),
             "last_verified": "2026-06-03",
         },
@@ -122,18 +125,21 @@ FEATURE_MANIFEST: FeatureManifest = {
                 "Planner, Recipe Book, or Fitness Tracker). Turning it on also hides "
                 "your in-app logs behind a matching dummy interface."
             ),
-            # Safety-critical, like Quick Exit. Anchored relative to the Quick Exit
-            # badge (the app pins the toggle "above Quick Exit"), so it stays correct
-            # even if the badge stack shifts (2026-06-03).
+            # Safety-critical. Activation runs THROUGH the Quick Exit badge: tap it to
+            # expand, then the eye icon (not the mascot) turns on Disguise Mode. Keep
+            # this in lockstep with quick_exit above.
             "ui_location": (
-                "Set it up on the Disguise Mode settings screen (pick a disguise icon, "
-                "then Save). To switch it on, tap the eye-icon badge floating on the "
-                "right side of the screen, pinned just above the Quick Exit badge."
+                "Reached from the floating 'Quick Exit' badge on the right side of the "
+                "screen: tapping that badge expands two icons — the cartoon mascot "
+                "(Quick Exit) and the eye icon (Disguise Mode). Which disguise icon is "
+                "shown is chosen on the Disguise Mode settings screen."
             ),
             "how_to_access": (
-                "Open Disguise Mode settings, choose a disguise (e.g. Budget Planner) "
-                "and tap Save; to toggle it on quickly, tap the eye icon pinned above "
-                "Quick Exit."
+                "To turn it on: 1) Tap the floating, movable 'Quick Exit' circular "
+                "badge on the right side of the screen. 2) It expands into two icons — "
+                "the cartoon mascot is Quick Exit, and the eye icon turns on Disguise "
+                "Mode; tap the eye icon. (Pick which disguise icon to show first in "
+                "Disguise Mode settings, then Save.)"
             ),
             "last_verified": "2026-06-03",
         },
