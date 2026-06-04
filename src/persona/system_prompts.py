@@ -115,6 +115,28 @@ FEATURE_MANIFEST: FeatureManifest = {
             ),
             "last_verified": "2026-06-03",
         },
+        "disguise_mode": {
+            "description": (
+                "Hides the Lea app on a shared or monitored device by swapping its "
+                "home-screen icon and name for an innocent-looking one (e.g. Budget "
+                "Planner, Recipe Book, or Fitness Tracker). Turning it on also hides "
+                "your in-app logs behind a matching dummy interface."
+            ),
+            # Safety-critical, like Quick Exit. Anchored relative to the Quick Exit
+            # badge (the app pins the toggle "above Quick Exit"), so it stays correct
+            # even if the badge stack shifts (2026-06-03).
+            "ui_location": (
+                "Set it up on the Disguise Mode settings screen (pick a disguise icon, "
+                "then Save). To switch it on, tap the eye-icon badge floating on the "
+                "right side of the screen, pinned just above the Quick Exit badge."
+            ),
+            "how_to_access": (
+                "Open Disguise Mode settings, choose a disguise (e.g. Budget Planner) "
+                "and tap Save; to toggle it on quickly, tap the eye icon pinned above "
+                "Quick Exit."
+            ),
+            "last_verified": "2026-06-03",
+        },
         "chat_history": {
             "description": ("Loads your past conversations, tied to your account."),
             "ui_location": ("Counter-clockwise clock icon in the top-right corner of the header."),

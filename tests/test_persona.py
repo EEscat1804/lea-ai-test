@@ -113,6 +113,15 @@ def test_quick_exit_location_is_grounded_not_top_of_screen() -> None:
     assert " / " not in loc
 
 
+def test_disguise_mode_is_grounded_to_the_eye_toggle() -> None:
+    # Safety feature (shared/monitored device). Ground it to the eye toggle above
+    # Quick Exit, per the in-app tooltip — not a guess, and never "top".
+    loc = FEATURE_MANIFEST["features"]["disguise_mode"]["ui_location"]
+    assert loc in DEFAULT_PERSONA
+    assert "eye" in loc.lower()
+    assert "quick exit" in loc.lower()
+
+
 def test_every_feature_is_dated() -> None:
     # Drift guard: a new entry can't ship undated. `last_verified` makes
     # staleness visible in review (mobile-UI move -> bump the date), so the
