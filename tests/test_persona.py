@@ -1,8 +1,11 @@
+import re
+
 import pytest
 
 from guardrails.session import SessionState
 from persona.system_prompts import (
     DEFAULT_PERSONA,
+    FEATURE_MANIFEST,
     FORBIDDEN_INTERNAL_TERMS,
     MODE_GUIDANCE,
     RESPONSE_MODES,
@@ -74,6 +77,85 @@ def test_persona_text_excludes_internal_terms() -> None:
     persona = DEFAULT_PERSONA.lower()
     for term in FORBIDDEN_INTERNAL_TERMS:
         assert term not in persona, f"internal term leaked into persona: {term!r}"
+
+
+# ---------------------------------------------------------------------------
+# Feature manifest — deterministic UI ground truth must reach the model
+#
+# Regression for the spatial-hallucination bug: Lea told users features were
+# somewhere they aren't. The fix hard-codes each feature's location in
+# FEATURE_MANIFEST and injects it into the persona. These assert the locations
+# actually reach the prompt, so a future persona edit can't silently drop them.
+# ---------------------------------------------------------------------------
+
+
+def test_every_manifest_location_reaches_the_persona() -> None:
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["ui_location"] in DEFAULT_PERSONA
+
+
+def test_every_manifest_access_step_reaches_the_persona() -> None:
+    # "how to activate and access" is a named requirement — assert the steps,
+    # not just the locations, reach the model.
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["how_to_access"] in DEFAULT_PERSONA
+
+
+def test_quick_exit_location_is_grounded_not_top_of_screen() -> None:
+    # The exact bug: Lea said Quick Exit was at the top. The grounded badge is on
+    # the right side (movable) — assert that reaches the model and never "top".
+    loc = FEATURE_MANIFEST["features"]["quick_exit"]["ui_location"]
+    assert loc in DEFAULT_PERSONA
+    assert "right" in loc.lower()
+    assert "top" not in loc.lower()
+
+
+def test_disguise_mode_activation_runs_through_quick_exit_then_eye() -> None:
+    # Safety feature. The verified flow: tap the Quick Exit badge, it expands, then
+    # the EYE icon (not the mascot) turns on Disguise Mode. Lock both the location
+    # and the step order so Lea can't revert to a "separate pinned badge" answer.
+    feat = FEATURE_MANIFEST["features"]["disguise_mode"]
+    assert feat["ui_location"] in DEFAULT_PERSONA
+    assert feat["how_to_access"] in DEFAULT_PERSONA
+    steps = feat["how_to_access"].lower()
+    assert "quick exit" in steps  # step 1 is tapping Quick Exit
+    assert "eye" in steps  # step 2 is the eye icon
+    assert steps.index("quick exit") < steps.index("eye")  # order: Quick Exit -> eye
+
+
+def test_disguise_covers_are_not_named_in_the_prompt() -> None:
+    # Safety leak-guard: disguise only protects if an abuser-as-user can't learn
+    # what the app looks like hidden. Specific cover names must never reach the
+    # model-visible prompt — the user picks the cover in-app.
+    persona = DEFAULT_PERSONA.lower()
+    for cover in ("budget planner", "recipe book", "fitness tracker"):
+        assert cover not in persona, f"disguise cover leaked into persona: {cover!r}"
+
+
+def test_every_feature_is_dated() -> None:
+    # Drift guard: a new entry can't ship undated. `last_verified` makes
+    # staleness visible in review (mobile-UI move -> bump the date), so the
+    # manifest can't silently rot into confident-but-wrong locations.
+    for name, spec in FEATURE_MANIFEST["features"].items():
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", spec["last_verified"]), (
+            f"{name} has a missing or malformed last_verified date"
+        )
+
+
+def test_last_verified_metadata_does_not_leak_into_the_prompt() -> None:
+    # last_verified is for maintainers, not the model — it must not reach Gemini.
+    assert "last_verified" not in DEFAULT_PERSONA
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["last_verified"] not in DEFAULT_PERSONA
+
+
+def test_manifest_survives_mode_composition() -> None:
+    # The locations are a hard constraint, not a tone — they must stay in every
+    # mode, not just the bare persona.
+    for mode in sorted(MODE_GUIDANCE):
+        prompt = compose_system_prompt("default", mode)
+        for spec in FEATURE_MANIFEST["features"].values():
+            assert spec["ui_location"] in prompt
 
 
 # ---------------------------------------------------------------------------

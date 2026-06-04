@@ -14,12 +14,13 @@ Editing rules:
 from __future__ import annotations
 
 import re
+from typing import TypedDict
 
 from guardrails.contracts import FeatureResult
 from guardrails.rules import LANGUAGE_COACH_SCRIPTS, RESP
 from guardrails.session import SessionState
 
-DEFAULT_PERSONA = """\
+_BASE_PERSONA = """\
 You are Lea — a compassionate, calm legal companion for survivors of
 domestic, sexual, and tech-facilitated violence. You help users understand
 their legal options without giving formal legal advice.
@@ -56,6 +57,161 @@ About the app (when the user asks what this is, or how it protects them):
   systems or security details. If you are unsure, say so and offer to connect
   them with support.
 """
+
+
+# ---------------------------------------------------------------------------
+# FEATURE MANIFEST — deterministic UI ground truth
+#
+# Lea was telling users features live where they don't ("Quick Exit is at the
+# top" — it isn't). A model can't see the screen, so any location it offers is a
+# guess. This dict is the single hard-coded source of where each feature is and
+# what it does; it's rendered into DEFAULT_PERSONA so the constraint reaches the
+# model instead of being left to invention.
+#
+# DRIFT IS THE LOAD-BEARING RISK. The prompt asserts this as "the ONLY accurate
+# source" and tells the model never to guess — so a stale entry does NOT degrade
+# to hedging, it makes Lea *confidently* state a wrong location. For Quick Exit
+# that is the exact safety failure this manifest exists to prevent, reintroduced
+# with false confidence. Guarding that:
+#   - OWNER: the mobile-app team owns these strings; a screen change that moves
+#     any control here MUST update this dict in the same change set.
+#   - VISIBLE STALENESS: every feature carries `last_verified` (the date its
+#     ui_location was last checked against a shipped screen). It is maintainer
+#     metadata only and is deliberately NOT rendered into the prompt. The
+#     `test_every_feature_is_dated` regression makes a new, undated entry fail
+#     CI, so staleness is forced into review instead of going silent.
+# When you re-verify a location against the app, bump its `last_verified`.
+# ---------------------------------------------------------------------------
+class FeatureSpec(TypedDict):
+    description: str
+    ui_location: str
+    how_to_access: str
+    last_verified: str  # ISO date the ui_location was checked vs a shipped screen
+
+
+class FeatureManifest(TypedDict):
+    app_name: str
+    features: dict[str, FeatureSpec]
+
+
+FEATURE_MANIFEST: FeatureManifest = {
+    "app_name": "Lea by Legali-AI",
+    "features": {
+        "quick_exit": {
+            "description": (
+                "Instantly closes the chat dashboard, clears the conversation from "
+                "view for privacy, and sends you to a safe, neutral webpage."
+            ),
+            # Safety-critical, and MOVABLE — the badge can be dragged, so it is honest
+            # to say "right side" rather than a false-precise pin. Tapping it expands
+            # into two icons: the mascot (Quick Exit) and the eye (Disguise Mode).
+            "ui_location": (
+                "A movable, floating circular pink badge labeled 'Quick Exit' on the "
+                "right side of the screen (it can be dragged, and sits around vertical "
+                "center by default). Tapping it expands two icons: a cartoon mascot and "
+                "an eye icon."
+            ),
+            "how_to_access": (
+                "Tap the floating 'Quick Exit' badge on the right side, then tap the "
+                "cartoon mascot icon to leave instantly. (The eye icon revealed next to "
+                "it is Disguise Mode, not Quick Exit.)"
+            ),
+            "last_verified": "2026-06-03",
+        },
+        "disguise_mode": {
+            "description": (
+                "Hides the Lea app on a shared or monitored device by swapping its "
+                "home-screen icon and name for an innocent-looking app of your choosing "
+                "(you pick the cover in Disguise Mode settings). Turning it on also "
+                "hides your in-app logs behind a matching dummy interface."
+            ),
+            # SECURITY: do NOT name the specific cover apps here — this text reaches the
+            # model, and disguise only protects if an abuser-as-user can't learn what the
+            # app looks like hidden. Keep the covers generic; the user picks them in-app.
+            # (Same leak-guard logic as FORBIDDEN_INTERNAL_TERMS, applied to the tell.)
+            # Safety-critical. Activation runs THROUGH the Quick Exit badge: tap it to
+            # expand, then the eye icon (not the mascot) turns on Disguise Mode. Keep
+            # this in lockstep with quick_exit above.
+            "ui_location": (
+                "Reached from the floating 'Quick Exit' badge on the right side of the "
+                "screen: tapping that badge expands two icons — the cartoon mascot "
+                "(Quick Exit) and the eye icon (Disguise Mode). Which disguise icon is "
+                "shown is chosen on the Disguise Mode settings screen."
+            ),
+            "how_to_access": (
+                "To turn it on: 1) Tap the floating, movable 'Quick Exit' circular "
+                "badge on the right side of the screen. 2) It expands into two icons — "
+                "the cartoon mascot is Quick Exit, and the eye icon turns on Disguise "
+                "Mode; tap the eye icon. (Pick which disguise icon to show first in "
+                "Disguise Mode settings, then Save.)"
+            ),
+            "last_verified": "2026-06-03",
+        },
+        "chat_history": {
+            "description": ("Loads your past conversations, tied to your account."),
+            "ui_location": ("Counter-clockwise clock icon in the top-right corner of the header."),
+            "how_to_access": "Tap the clock icon in the top-right of the header.",
+            "last_verified": "2026-06-03",
+        },
+        "session_closure": {
+            "description": "Exits the active workspace window.",
+            "ui_location": "An 'X' icon in the top-left corner of the header.",
+            "how_to_access": "Tap the X in the top-left of the header.",
+            "last_verified": "2026-06-03",
+        },
+        "behavioral_mode_dropdown": {
+            "description": "Changes how Lea responds (her response mode) mid-session.",
+            "ui_location": ("The pill-shaped button directly below the central rabbit avatar."),
+            "how_to_access": (
+                "Tap the mode pill (e.g. 'Direct') below the avatar, then pick a mode."
+            ),
+            "last_verified": "2026-06-03",
+        },
+        "attachment_utility": {
+            "description": (
+                "Opens the attachment tray to add photos, documents, camera "
+                "captures, or voice recordings."
+            ),
+            "ui_location": (
+                "The circular plus (+) button on the immediate left inside the "
+                "bottom chat input bar."
+            ),
+            "how_to_access": (
+                "Tap the + button in the input bar, then choose Photo, Camera, "
+                "Document, or Voice Note."
+            ),
+            "last_verified": "2026-06-03",
+        },
+    },
+}
+
+
+def _render_feature_manifest(manifest: FeatureManifest) -> str:
+    """Render the manifest into a hard constraint block for the system prompt.
+
+    Deterministic: dict insertion order is stable, so the same manifest always
+    produces the same text (no nondeterminism reaching the model or the tests).
+    `last_verified` is maintainer metadata and is intentionally NOT rendered —
+    the model only ever sees the description, location, and access steps.
+    """
+    lines = [
+        f"Where things are in {manifest['app_name']} (the ONLY accurate source):",
+        "When a user asks where a feature is or how to use it, use exactly the "
+        "location and steps below. Never guess, move, or invent a location — a wrong "
+        "one breaks trust and, for Quick Exit, safety. If a feature isn't listed "
+        "here, say you're not certain where it is rather than guessing.",
+    ]
+    for name, spec in manifest["features"].items():
+        label = name.replace("_", " ")
+        lines.append(
+            f"- {label}: {spec['description']} Location: {spec['ui_location']} "
+            f"To use it: {spec['how_to_access']}"
+        )
+    return "\n".join(lines)
+
+
+DEFAULT_PERSONA = _BASE_PERSONA + "\n" + _render_feature_manifest(FEATURE_MANIFEST) + "\n"
+
 
 # Internal architecture terms that must never surface in any user-facing prompt
 # or model output. DEFAULT_PERSONA reaches Gemini and shapes replies, so a leak
