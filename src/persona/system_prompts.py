@@ -66,14 +66,27 @@ About the app (when the user asks what this is, or how it protects them):
 # top" — it isn't). A model can't see the screen, so any location it offers is a
 # guess. This dict is the single hard-coded source of where each feature is and
 # what it does; it's rendered into DEFAULT_PERSONA so the constraint reaches the
-# model instead of being left to invention. Keep `ui_location` accurate to the
-# shipped app — if the app's layout moves and this doesn't, the hallucination
-# this prevents comes straight back.
+# model instead of being left to invention.
+#
+# DRIFT IS THE LOAD-BEARING RISK. The prompt asserts this as "the ONLY accurate
+# source" and tells the model never to guess — so a stale entry does NOT degrade
+# to hedging, it makes Lea *confidently* state a wrong location. For Quick Exit
+# that is the exact safety failure this manifest exists to prevent, reintroduced
+# with false confidence. Guarding that:
+#   - OWNER: the mobile-app team owns these strings; a screen change that moves
+#     any control here MUST update this dict in the same change set.
+#   - VISIBLE STALENESS: every feature carries `last_verified` (the date its
+#     ui_location was last checked against a shipped screen). It is maintainer
+#     metadata only and is deliberately NOT rendered into the prompt. The
+#     `test_every_feature_is_dated` regression makes a new, undated entry fail
+#     CI, so staleness is forced into review instead of going silent.
+# When you re-verify a location against the app, bump its `last_verified`.
 # ---------------------------------------------------------------------------
 class FeatureSpec(TypedDict):
     description: str
     ui_location: str
     how_to_access: str
+    last_verified: str  # ISO date the ui_location was checked vs a shipped screen
 
 
 class FeatureManifest(TypedDict):
@@ -89,24 +102,30 @@ FEATURE_MANIFEST: FeatureManifest = {
                 "Instantly closes the chat dashboard, clears the conversation from "
                 "view for privacy, and sends you to a safe, neutral webpage."
             ),
+            # Safety-critical entry — pinned to a single anchor, not a range, so the
+            # most important direction is the least ambiguous (review note, 2026-06-03).
             "ui_location": (
-                "Floating circular pink mascot badge anchored on the "
-                "middle-right / lower-right of the active screen."
+                "Floating circular pink mascot badge pinned to the right edge of the "
+                "screen at vertical center (right-middle); it floats above the "
+                "conversation and stays put while scrolling."
             ),
             "how_to_access": (
                 "Tap the Quick Exit badge — it stays on screen the whole time, so "
                 "there's no menu to open first."
             ),
+            "last_verified": "2026-06-03",
         },
         "chat_history": {
             "description": ("Loads your past conversations, tied to your account."),
             "ui_location": ("Counter-clockwise clock icon in the top-right corner of the header."),
             "how_to_access": "Tap the clock icon in the top-right of the header.",
+            "last_verified": "2026-06-03",
         },
         "session_closure": {
             "description": "Exits the active workspace window.",
             "ui_location": "An 'X' icon in the top-left corner of the header.",
             "how_to_access": "Tap the X in the top-left of the header.",
+            "last_verified": "2026-06-03",
         },
         "behavioral_mode_dropdown": {
             "description": "Changes how Lea responds (her response mode) mid-session.",
@@ -114,6 +133,7 @@ FEATURE_MANIFEST: FeatureManifest = {
             "how_to_access": (
                 "Tap the mode pill (e.g. 'Direct') below the avatar, then pick a mode."
             ),
+            "last_verified": "2026-06-03",
         },
         "attachment_utility": {
             "description": (
@@ -128,6 +148,7 @@ FEATURE_MANIFEST: FeatureManifest = {
                 "Tap the + button in the input bar, then choose Photo, Camera, "
                 "Document, or Voice Note."
             ),
+            "last_verified": "2026-06-03",
         },
     },
 }
@@ -138,6 +159,8 @@ def _render_feature_manifest(manifest: FeatureManifest) -> str:
 
     Deterministic: dict insertion order is stable, so the same manifest always
     produces the same text (no nondeterminism reaching the model or the tests).
+    `last_verified` is maintainer metadata and is intentionally NOT rendered —
+    the model only ever sees the description, location, and access steps.
     """
     lines = [
         f"Where things are in {manifest['app_name']} (the ONLY accurate source):",

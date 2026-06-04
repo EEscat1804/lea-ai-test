@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from guardrails.session import SessionState
@@ -100,10 +102,32 @@ def test_every_manifest_access_step_reaches_the_persona() -> None:
 
 
 def test_quick_exit_location_is_grounded_not_top_of_screen() -> None:
-    # The exact bug: Lea said Quick Exit was at the top. The grounded location
-    # is the lower/middle-right mascot badge — assert that reaches the model.
-    assert FEATURE_MANIFEST["features"]["quick_exit"]["ui_location"] in DEFAULT_PERSONA
-    assert "middle-right / lower-right" in DEFAULT_PERSONA
+    # The exact bug: Lea said Quick Exit was at the top. The grounded location is
+    # the right-middle mascot badge — assert that reaches the model.
+    loc = FEATURE_MANIFEST["features"]["quick_exit"]["ui_location"]
+    assert loc in DEFAULT_PERSONA
+    assert "right-middle" in loc.lower()
+    # Safety-critical entry is pinned to one anchor, never "top", and never a
+    # left-or-right range (review note): the key direction must be unambiguous.
+    assert "top" not in loc.lower()
+    assert " / " not in loc
+
+
+def test_every_feature_is_dated() -> None:
+    # Drift guard: a new entry can't ship undated. `last_verified` makes
+    # staleness visible in review (mobile-UI move -> bump the date), so the
+    # manifest can't silently rot into confident-but-wrong locations.
+    for name, spec in FEATURE_MANIFEST["features"].items():
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", spec["last_verified"]), (
+            f"{name} has a missing or malformed last_verified date"
+        )
+
+
+def test_last_verified_metadata_does_not_leak_into_the_prompt() -> None:
+    # last_verified is for maintainers, not the model — it must not reach Gemini.
+    assert "last_verified" not in DEFAULT_PERSONA
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["last_verified"] not in DEFAULT_PERSONA
 
 
 def test_manifest_survives_mode_composition() -> None:
