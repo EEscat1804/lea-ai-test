@@ -106,31 +106,31 @@ data stored server-side per account, encrypted at rest with provider-managed
 keys, served to any device after login. The trade-off is that it is **not**
 zero-knowledge — the server is technically able to decrypt.
 
-### The one thing to verify, and the one decision to make
+### Authoritative answer (confirmed in `docs/encryption.md` §8.3, §9)
 
-1. **Verify (mobile-FE question):** is the mobile app actually *syncing* the
-   Vault to `POST /api/lea/vault/entries`, or is it keeping a local-only copy
-   and not pushing to the server? If it's local-only, that's the real gap — and
-   the fix is in the mobile app, not here. The backend already supports durable,
-   account-bound storage.
+The Vault is actually **two surfaces**, and they have different durability:
 
-2. **Decide (product/legal — needs the manager):** there is a real, unavoidable
-   trade-off, and it's a safety call, not just an engineering one:
+| Surface | Encryption | Survives device loss? |
+|---|---|---|
+| **Vault entries** (structured data: `victim_info`, incidents, etc.) | Server-held envelope (KEK/DEK), account-bound. *Flag `ENCRYPT_VAULT` is not yet flipped, so today they're plaintext-at-rest — still server-side.* | ✅ **Yes** — recoverable on any device after login |
+| **Vault files** (uploaded binaries in R2) | Truly zero-knowledge — client-side AES-256 before upload, server has no key | ❌ **No** — if the device-held key is lost, the file is unrecoverable |
 
-   | Model | Survives device loss? | Who can read it | Risk |
-   |---|---|---|---|
-   | **Server-managed keys** (today's envelope encryption) | ✅ yes, after login | The server (and anyone who compromises the KEK) | Server compromise exposes data |
-   | **Zero-knowledge** (key derived from a user passphrase, server never holds it) | ⚠️ only if they remember the passphrase | Only the user | A forgotten passphrase = **data unrecoverable** |
+So the "stored only on the device" fear is **mostly already solved**: the
+*structured* evidence is account-bound and survives. The gap is **uploaded
+files** — those are zero-knowledge by design, so a lost device key loses them.
 
-   For survivors in crisis, "forgot the passphrase → evidence gone forever" is
-   itself dangerous, which is why most DV tools choose **server-recoverable**
-   (today's model) over pure zero-knowledge. A common middle path is server-
-   managed keys **plus** an optional user recovery code for those who want it.
+### What's left to verify / decide
 
-   > Note: there's a stale "zero-knowledge / server never decrypts" comment in
-   > `vault.routes.ts` and `vault.schemas.ts` that doesn't match the envelope-
-   > encryption code in `vault.service.ts`. Worth reconciling so the documented
-   > model matches the real one.
+1. **Verify (mobile-FE question):** does the mobile app *sync* vault entries to
+   `POST /api/lea/vault/entries`, or keep a local-only copy? The backend supports
+   durable account-bound storage; if the app isn't pushing to it, that's the gap,
+   and the fix is in the mobile app.
+
+2. **Decide (product/legal — needs the manager):** for **vault files**, the
+   zero-knowledge design means device-key loss = file loss. If survivors must be
+   able to recover *files* on a new device, the team needs a key-recovery path
+   (e.g. a user recovery code, or moving file-key custody to the server envelope
+   scheme like entries use) — a real privacy-vs-durability safety call.
 
 ---
 
