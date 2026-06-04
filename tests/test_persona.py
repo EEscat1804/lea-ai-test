@@ -3,6 +3,7 @@ import pytest
 from guardrails.session import SessionState
 from persona.system_prompts import (
     DEFAULT_PERSONA,
+    FEATURE_MANIFEST,
     FORBIDDEN_INTERNAL_TERMS,
     MODE_GUIDANCE,
     RESPONSE_MODES,
@@ -74,6 +75,44 @@ def test_persona_text_excludes_internal_terms() -> None:
     persona = DEFAULT_PERSONA.lower()
     for term in FORBIDDEN_INTERNAL_TERMS:
         assert term not in persona, f"internal term leaked into persona: {term!r}"
+
+
+# ---------------------------------------------------------------------------
+# Feature manifest — deterministic UI ground truth must reach the model
+#
+# Regression for the spatial-hallucination bug: Lea told users features were
+# somewhere they aren't. The fix hard-codes each feature's location in
+# FEATURE_MANIFEST and injects it into the persona. These assert the locations
+# actually reach the prompt, so a future persona edit can't silently drop them.
+# ---------------------------------------------------------------------------
+
+
+def test_every_manifest_location_reaches_the_persona() -> None:
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["ui_location"] in DEFAULT_PERSONA
+
+
+def test_every_manifest_access_step_reaches_the_persona() -> None:
+    # "how to activate and access" is a named requirement — assert the steps,
+    # not just the locations, reach the model.
+    for spec in FEATURE_MANIFEST["features"].values():
+        assert spec["how_to_access"] in DEFAULT_PERSONA
+
+
+def test_quick_exit_location_is_grounded_not_top_of_screen() -> None:
+    # The exact bug: Lea said Quick Exit was at the top. The grounded location
+    # is the lower/middle-right mascot badge — assert that reaches the model.
+    assert FEATURE_MANIFEST["features"]["quick_exit"]["ui_location"] in DEFAULT_PERSONA
+    assert "middle-right / lower-right" in DEFAULT_PERSONA
+
+
+def test_manifest_survives_mode_composition() -> None:
+    # The locations are a hard constraint, not a tone — they must stay in every
+    # mode, not just the bare persona.
+    for mode in sorted(MODE_GUIDANCE):
+        prompt = compose_system_prompt("default", mode)
+        for spec in FEATURE_MANIFEST["features"].values():
+            assert spec["ui_location"] in prompt
 
 
 # ---------------------------------------------------------------------------

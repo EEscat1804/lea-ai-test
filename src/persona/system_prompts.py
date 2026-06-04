@@ -14,12 +14,13 @@ Editing rules:
 from __future__ import annotations
 
 import re
+from typing import TypedDict
 
 from guardrails.contracts import FeatureResult
 from guardrails.rules import LANGUAGE_COACH_SCRIPTS, RESP
 from guardrails.session import SessionState
 
-DEFAULT_PERSONA = """\
+_BASE_PERSONA = """\
 You are Lea — a compassionate, calm legal companion for survivors of
 domestic, sexual, and tech-facilitated violence. You help users understand
 their legal options without giving formal legal advice.
@@ -56,6 +57,106 @@ About the app (when the user asks what this is, or how it protects them):
   systems or security details. If you are unsure, say so and offer to connect
   them with support.
 """
+
+
+# ---------------------------------------------------------------------------
+# FEATURE MANIFEST — deterministic UI ground truth
+#
+# Lea was telling users features live where they don't ("Quick Exit is at the
+# top" — it isn't). A model can't see the screen, so any location it offers is a
+# guess. This dict is the single hard-coded source of where each feature is and
+# what it does; it's rendered into DEFAULT_PERSONA so the constraint reaches the
+# model instead of being left to invention. Keep `ui_location` accurate to the
+# shipped app — if the app's layout moves and this doesn't, the hallucination
+# this prevents comes straight back.
+# ---------------------------------------------------------------------------
+class FeatureSpec(TypedDict):
+    description: str
+    ui_location: str
+    how_to_access: str
+
+
+class FeatureManifest(TypedDict):
+    app_name: str
+    features: dict[str, FeatureSpec]
+
+
+FEATURE_MANIFEST: FeatureManifest = {
+    "app_name": "Lea by Legali-AI",
+    "features": {
+        "quick_exit": {
+            "description": (
+                "Instantly closes the chat dashboard, clears the conversation from "
+                "view for privacy, and sends you to a safe, neutral webpage."
+            ),
+            "ui_location": (
+                "Floating circular pink mascot badge anchored on the "
+                "middle-right / lower-right of the active screen."
+            ),
+            "how_to_access": (
+                "Tap the Quick Exit badge — it stays on screen the whole time, so "
+                "there's no menu to open first."
+            ),
+        },
+        "chat_history": {
+            "description": ("Loads your past conversations, tied to your account."),
+            "ui_location": ("Counter-clockwise clock icon in the top-right corner of the header."),
+            "how_to_access": "Tap the clock icon in the top-right of the header.",
+        },
+        "session_closure": {
+            "description": "Exits the active workspace window.",
+            "ui_location": "An 'X' icon in the top-left corner of the header.",
+            "how_to_access": "Tap the X in the top-left of the header.",
+        },
+        "behavioral_mode_dropdown": {
+            "description": "Changes how Lea responds (her response mode) mid-session.",
+            "ui_location": ("The pill-shaped button directly below the central rabbit avatar."),
+            "how_to_access": (
+                "Tap the mode pill (e.g. 'Direct') below the avatar, then pick a mode."
+            ),
+        },
+        "attachment_utility": {
+            "description": (
+                "Opens the attachment tray to add photos, documents, camera "
+                "captures, or voice recordings."
+            ),
+            "ui_location": (
+                "The circular plus (+) button on the immediate left inside the "
+                "bottom chat input bar."
+            ),
+            "how_to_access": (
+                "Tap the + button in the input bar, then choose Photo, Camera, "
+                "Document, or Voice Note."
+            ),
+        },
+    },
+}
+
+
+def _render_feature_manifest(manifest: FeatureManifest) -> str:
+    """Render the manifest into a hard constraint block for the system prompt.
+
+    Deterministic: dict insertion order is stable, so the same manifest always
+    produces the same text (no nondeterminism reaching the model or the tests).
+    """
+    lines = [
+        f"Where things are in {manifest['app_name']} (the ONLY accurate source):",
+        "When a user asks where a feature is or how to use it, use exactly the "
+        "location and steps below. Never guess, move, or invent a location — a wrong "
+        "one breaks trust and, for Quick Exit, safety. If a feature isn't listed "
+        "here, say you're not certain where it is rather than guessing.",
+    ]
+    for name, spec in manifest["features"].items():
+        label = name.replace("_", " ")
+        lines.append(
+            f"- {label}: {spec['description']} Location: {spec['ui_location']} "
+            f"To use it: {spec['how_to_access']}"
+        )
+    return "\n".join(lines)
+
+
+DEFAULT_PERSONA = _BASE_PERSONA + "\n" + _render_feature_manifest(FEATURE_MANIFEST) + "\n"
+
 
 # Internal architecture terms that must never surface in any user-facing prompt
 # or model output. DEFAULT_PERSONA reaches Gemini and shapes replies, so a leak
