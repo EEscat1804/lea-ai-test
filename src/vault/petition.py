@@ -19,7 +19,30 @@ from collections.abc import Callable
 from typing import Any
 
 from lib.responses import json_response, problem_response
-from vault.forms import ca, ga, hi, ma, md, nc, ny, pa, tx, va, wa
+from vault.forms import (
+    ak,
+    al,
+    ar,
+    ca,
+    co,
+    ct,
+    dc,
+    de,
+    fl,
+    ga,
+    hi,
+    ma,
+    md,
+    nc,
+    ny,
+    pa,
+    tx,
+    va,
+    wa,
+    wi,
+    wv,
+    wy,
+)
 
 # jurisdiction -> assembler. Add a state here when its forms package lands.
 _ASSEMBLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -34,6 +57,17 @@ _ASSEMBLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "MD": md.assemble,
     "HI": hi.assemble,
     "GA": ga.assemble,
+    "FL": fl.assemble,
+    "DE": de.assemble,
+    "DC": dc.assemble,
+    "CT": ct.assemble,
+    "CO": co.assemble,
+    "AR": ar.assemble,
+    "AK": ak.assemble,
+    "AL": al.assemble,
+    "WY": wy.assemble,
+    "WI": wi.assemble,
+    "WV": wv.assemble,
 }
 
 
