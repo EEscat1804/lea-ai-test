@@ -123,6 +123,15 @@ def test_disguise_mode_activation_runs_through_quick_exit_then_eye() -> None:
     assert steps.index("quick exit") < steps.index("eye")  # order: Quick Exit -> eye
 
 
+def test_disguise_covers_are_not_named_in_the_prompt() -> None:
+    # Safety leak-guard: disguise only protects if an abuser-as-user can't learn
+    # what the app looks like hidden. Specific cover names must never reach the
+    # model-visible prompt — the user picks the cover in-app.
+    persona = DEFAULT_PERSONA.lower()
+    for cover in ("budget planner", "recipe book", "fitness tracker"):
+        assert cover not in persona, f"disguise cover leaked into persona: {cover!r}"
+
+
 def test_every_feature_is_dated() -> None:
     # Drift guard: a new entry can't ship undated. `last_verified` makes
     # staleness visible in review (mobile-UI move -> bump the date), so the

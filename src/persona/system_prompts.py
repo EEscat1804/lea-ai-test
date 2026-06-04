@@ -121,10 +121,14 @@ FEATURE_MANIFEST: FeatureManifest = {
         "disguise_mode": {
             "description": (
                 "Hides the Lea app on a shared or monitored device by swapping its "
-                "home-screen icon and name for an innocent-looking one (e.g. Budget "
-                "Planner, Recipe Book, or Fitness Tracker). Turning it on also hides "
-                "your in-app logs behind a matching dummy interface."
+                "home-screen icon and name for an innocent-looking app of your choosing "
+                "(you pick the cover in Disguise Mode settings). Turning it on also "
+                "hides your in-app logs behind a matching dummy interface."
             ),
+            # SECURITY: do NOT name the specific cover apps here — this text reaches the
+            # model, and disguise only protects if an abuser-as-user can't learn what the
+            # app looks like hidden. Keep the covers generic; the user picks them in-app.
+            # (Same leak-guard logic as FORBIDDEN_INTERNAL_TERMS, applied to the tell.)
             # Safety-critical. Activation runs THROUGH the Quick Exit badge: tap it to
             # expand, then the eye icon (not the mascot) turns on Disguise Mode. Keep
             # this in lockstep with quick_exit above.
