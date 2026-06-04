@@ -16,8 +16,9 @@ Stateless contract:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from guardrails.contracts import FeatureResult
 from guardrails.rules import RESP
@@ -27,7 +28,7 @@ from lib.responses import json_response, problem_response
 # Jurisdictions supported for the full Petition process
 SUPPORTED_JURISDICTIONS = {
     "CA", "NY", "TX", "FL", "WA", "VA", "PA", "NC", "MA", "MD", "HI", "GA", "DE", "DC", "CT",
-    "CO", "AR", "AK", "AL", "WY", "WI", "WV",
+    "CO", "AR", "AK", "AL", "WY", "WI", "WV", "VT", "UT", "TN", "SD", "RI", "OR", "OK",
 }
 # States with no physical DVRO petition form — they e-file through a state portal.
 # We collect Tier 1, then hand off to that portal instead of assembling a form.
@@ -109,9 +110,10 @@ VEHICLE_DESCRIPTION_STATES = frozenset(
         "NH",
         "ND",
         "OH",
-        "OK",
         "SC",
-        "TN",
+        # OK and TN are in the doc's Q41-43 list, but their actual AOC / OP forms have
+        # no vehicle field — omitted so the vehicle gate doesn't ask for what the form
+        # can't carry. See vault.forms.ok and vault.forms.tn.
         "UT",
         "VA",
         "WA",
@@ -479,250 +481,284 @@ async def handle_intake_step(body: dict[str, Any], env: Any) -> Any:
     return json_response(next_step)
 
 
-def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str, Any]:
-    for step in TIER_1_FLOW:
-        field = step["field"]
-        if field not in answers:
-            step_dict: dict[str, Any] = step
-            schema_overlay = step_dict["schema"].copy()
+class IntakeStateMachine:
+    """OOP wrapper around the Vault intake state machine.
 
-            if field == "relationship.type" and jurisdiction == "CA":
-                schema_overlay["enum"] = [
-                    "married",
-                    "dating",
-                    "engaged",
-                    "cohabiting",
-                    "child_in_common",
-                ]
-            return {"step": field, "prompt": step_dict["prompt"], "schema": schema_overlay}
+    `next_step` reproduces the documented pure-function contract
+    `(jurisdiction, answers) -> next question`, dispatching each jurisdiction's
+    block to a `_<xx>_step` method via `_STATE_STEPS`. Tier-1 and the shared
+    Tier-2 gates stay shared methods; the SSN gate runs last, as before.
+    Behavior is identical to the previous flat `determine_next_step`; the public
+    function below delegates here so the call contract is unchanged.
+    """
 
-    if jurisdiction in HANDOFF_JURISDICTIONS:
-        return {
-            "step": "handoff",
-            "action": "redirect",
-            "reason": f"Jurisdiction {jurisdiction} requires external portal routing.",
-        }
+    def next_step(self, jurisdiction: str, answers: dict[str, Any]) -> dict[str, Any]:
+        tier1 = self._tier1(jurisdiction, answers)
+        if tier1 is not None:
+            return tier1
+        gated = self._shared_gates(jurisdiction, answers)
+        if gated is not None:
+            return gated
+        handler = self._STATE_STEPS.get(jurisdiction)
+        if handler is not None:
+            state_step = handler(self, answers)
+            if state_step is not None:
+                return state_step
+        ssn = self._ssn_gate(jurisdiction, answers)
+        if ssn is not None:
+            return ssn
+        return {"step": "done", "jurisdiction": jurisdiction}
 
-    if (
-        _is_minor(answers.get("petitioner.dob", ""))
-        and jurisdiction in MINOR_FILING_STATES
-        and "petitioner.minor_filing_path" not in answers
-    ):
-        return {
-            "step": "petitioner.minor_filing_path",
-            "prompt": (
-                "Looks like you're under 18 — most states want an adult to file alongside "
-                "someone your age. Is there a parent, a guardian, or another trusted adult who "
-                "could? If not, there's still a way forward, and we can figure it out."
-            ),
-            "schema": {"type": "string"},
-        }
+    def _tier1(self, jurisdiction: str, answers: dict[str, Any]) -> dict[str, Any] | None:
+        for step in TIER_1_FLOW:
+            field = step["field"]
+            if field not in answers:
+                step_dict: dict[str, Any] = step
+                schema_overlay = step_dict["schema"].copy()
 
-    if jurisdiction == "FL" and "petitioner.race" not in answers:
-        return {
-            "step": "petitioner.race",
-            "prompt": (
-                "Some states ask about race or ethnicity on the form itself — yours does. "
-                "You can write what fits, or skip. Lea defaults to 'not disclosed.'"
-            ),
-            "schema": {"type": "string"},
-        }
+                if field == "relationship.type" and jurisdiction == "CA":
+                    schema_overlay["enum"] = [
+                        "married",
+                        "dating",
+                        "engaged",
+                        "cohabiting",
+                        "child_in_common",
+                    ]
+                return {"step": field, "prompt": step_dict["prompt"], "schema": schema_overlay}
+        return None
 
-    if jurisdiction in {"CA", "FL"} and "petitioner.gender" not in answers:
-        return {
-            "step": "petitioner.gender",
-            "prompt": (
-                "Your state has a gender field on the form. "
-                "How would you describe yours — or want to skip it?"
-            ),
-            "schema": {"type": "string"},
-        }
-
-    if (
-        jurisdiction in {"CA", "NY", "TX", "FL", "WA", "NC", "MA", "MD", "DE", "AR", "CT", "WI"}
-        and "petitioner.interpreter_language" not in answers
-    ):
-        return {
-            "step": "petitioner.interpreter_language",
-            "prompt": (
-                "If you go to a hearing, would you want an interpreter there? "
-                "If yes — what language?"
-            ),
-            "schema": {"type": "string"},
-        }
-
-    if (
-        jurisdiction in {"CA", "FL", "WA", "WV"}
-        and "petitioner.disability_accommodation" not in answers
-    ):
-        return {
-            "step": "petitioner.disability_accommodation",
-            "prompt": (
-                "Do you need any accommodations at court — "
-                "a ramp, a quiet room, a sign-language interpreter?"
-            ),
-            "schema": {"type": "string"},
-        }
-
-    if jurisdiction in PHYSICAL_DESCRIPTION_STATES:
-        # Frame the cluster's purpose ONCE, on the first question the user sees (height),
-        # then keep the rest short — repeating the sheriff preamble on every field reads as
-        # interrogation. See the Tone doc's frame-purpose rule.
-        physical_fields = [
-            (
-                "respondent.height",
-                "These next few — height, weight, what they look like — feel personal, I know. "
-                "They're for the sheriff who delivers the papers, not for me, and estimates are "
-                "fine. About how tall?",
-                {"type": "string"},
-            ),
-            ("respondent.weight", "About what they weigh?", {"type": "string"}),
-            ("respondent.eye_color", "Eye color?", {"type": "string"}),
-            ("respondent.hair_color", "Hair color?", {"type": "string"}),
-            (
-                "respondent.distinguishing_marks",
-                "Tattoos, scars, anything that stands out — "
-                "anything the sheriff might use to recognize them?",
-                {"type": "string"},
-            ),
-        ]
-        for f_id, pr, sc in physical_fields:
-            if f_id not in answers:
-                return {"step": f_id, "prompt": pr, "schema": sc}
-
-    if "respondent.employer_name" not in answers:
-        return {
-            "step": "respondent.employer_name",
-            "prompt": (
-                "Where do they work? The court sometimes uses a job address to deliver "
-                "papers if home doesn't work."
-            ),
-            "schema": {"type": "string"},
-        }
-    if "respondent.employer_address" not in answers:
-        return {
-            "step": "respondent.employer_address",
-            "prompt": "What's the work address?",
-            "schema": {"type": "string"},
-        }
-    if jurisdiction == "FL" and "respondent.employer_hours" not in answers:
-        return {
-            "step": "respondent.employer_hours",
-            "prompt": "Working hours?",
-            "schema": {"type": "string"},
-        }
-
-    if jurisdiction in VEHICLE_DESCRIPTION_STATES:
-        if "respondent.vehicle_make_model" not in answers:
+    def _shared_gates(
+        self, jurisdiction: str, answers: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if jurisdiction in HANDOFF_JURISDICTIONS:
             return {
-                "step": "respondent.vehicle_make_model",
-                "prompt": "Do they drive? What kind of car?",
-                "schema": {"type": "string"},
+                "step": "handoff",
+                "action": "redirect",
+                "reason": f"Jurisdiction {jurisdiction} requires external portal routing.",
             }
-        if "respondent.vehicle_color" not in answers:
+
+        if (
+            _is_minor(answers.get("petitioner.dob", ""))
+            and jurisdiction in MINOR_FILING_STATES
+            and "petitioner.minor_filing_path" not in answers
+        ):
             return {
-                "step": "respondent.vehicle_color",
-                "prompt": "Color?",
-                "schema": {"type": "string"},
-            }
-        if "respondent.vehicle_plate" not in answers:
-            return {
-                "step": "respondent.vehicle_plate",
-                "prompt": "License plate, if you know?",
+                "step": "petitioner.minor_filing_path",
+                "prompt": (
+                    "Looks like you're under 18 — most states want an adult to file alongside "
+                    "someone your age. Is there a parent, a guardian, or another trusted adult who "
+                    "could? If not, there's still a way forward, and we can figure it out."
+                ),
                 "schema": {"type": "string"},
             }
 
-    if jurisdiction in {"FL", "NY", "TX"} and "respondent.is_law_enforcement" not in answers:
-        return {
-            "step": "respondent.is_law_enforcement",
-            "prompt": (
-                "Is their job one where they carry a firearm — police, military, security? "
-                "It changes how some of the orders work."
-            ),
-            "schema": {"type": "boolean"},
-        }
-    if jurisdiction == "FL" and "respondent.is_active_military" not in answers:
-        return {
-            "step": "respondent.is_active_military",
-            "prompt": (
-                "Are they on active military duty right now? If yes, there's a federal law "
-                "that gives them extra time to respond, and we should plan for it."
-            ),
-            "schema": {"type": "boolean"},
-        }
-    if jurisdiction == "CA" and "respondent.immigration_status_known" not in answers:
-        return {
-            "step": "respondent.immigration_status_known",
-            "prompt": (
-                "Do you know their immigration status? (We don't share this — "
-                "it can affect what protections you have.)"
-            ),
-            "schema": {"type": "boolean"},
-        }
-    if (
-        jurisdiction in {"CA", "NY", "TX", "FL", "AR"}
-        and "respondent.prior_criminal_history" not in answers
-    ):
-        return {
-            "step": "respondent.prior_criminal_history",
-            "prompt": (
-                "Has he/she/they ever been arrested or convicted of "
-                "anything violent that you know of?"
-            ),
-            "schema": {"type": "boolean"},
-        }
-
-    if jurisdiction == "TX":
-        if "respondent.prior_dv_finding" not in answers:
+        if jurisdiction == "FL" and "petitioner.race" not in answers:
             return {
-                "step": "respondent.prior_dv_finding",
-                "prompt": "Has a court ever found them guilty of family violence specifically?",
+                "step": "petitioner.race",
+                "prompt": (
+                    "Some states ask about race or ethnicity on the form itself — yours does. "
+                    "You can write what fits, or skip. Lea defaults to 'not disclosed.'"
+                ),
+                "schema": {"type": "string"},
+            }
+
+        if jurisdiction in {"CA", "FL"} and "petitioner.gender" not in answers:
+            return {
+                "step": "petitioner.gender",
+                "prompt": (
+                    "Your state has a gender field on the form. "
+                    "How would you describe yours — or want to skip it?"
+                ),
+                "schema": {"type": "string"},
+            }
+
+        if (
+            jurisdiction
+            in {"CA", "NY", "TX", "FL", "WA", "NC", "MA", "MD", "DE", "AR", "CT", "WI", "OR"}
+            and "petitioner.interpreter_language" not in answers
+        ):
+            return {
+                "step": "petitioner.interpreter_language",
+                "prompt": (
+                    "If you go to a hearing, would you want an interpreter there? "
+                    "If yes — what language?"
+                ),
+                "schema": {"type": "string"},
+            }
+
+        if (
+            jurisdiction in {"CA", "FL", "WA", "WV"}
+            and "petitioner.disability_accommodation" not in answers
+        ):
+            return {
+                "step": "petitioner.disability_accommodation",
+                "prompt": (
+                    "Do you need any accommodations at court — "
+                    "a ramp, a quiet room, a sign-language interpreter?"
+                ),
+                "schema": {"type": "string"},
+            }
+
+        if jurisdiction in PHYSICAL_DESCRIPTION_STATES:
+            # Frame the cluster's purpose ONCE, on the first question the user sees (height),
+            # then keep the rest short — repeating the sheriff preamble on every field reads as
+            # interrogation. See the Tone doc's frame-purpose rule.
+            physical_fields = [
+                (
+                    "respondent.height",
+                    "These next few — height, weight, what they look like — feel personal, I know. "
+                    "They're for the sheriff who delivers the papers, not for me, and "
+                    "estimates are fine. About how tall?",
+                    {"type": "string"},
+                ),
+                ("respondent.weight", "About what they weigh?", {"type": "string"}),
+                ("respondent.eye_color", "Eye color?", {"type": "string"}),
+                ("respondent.hair_color", "Hair color?", {"type": "string"}),
+                (
+                    "respondent.distinguishing_marks",
+                    "Tattoos, scars, anything that stands out — "
+                    "anything the sheriff might use to recognize them?",
+                    {"type": "string"},
+                ),
+            ]
+            for f_id, pr, sc in physical_fields:
+                if f_id not in answers:
+                    return {"step": f_id, "prompt": pr, "schema": sc}
+
+        if "respondent.employer_name" not in answers:
+            return {
+                "step": "respondent.employer_name",
+                "prompt": (
+                    "Where do they work? The court sometimes uses a job address to deliver "
+                    "papers if home doesn't work."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.employer_address" not in answers:
+            return {
+                "step": "respondent.employer_address",
+                "prompt": "What's the work address?",
+                "schema": {"type": "string"},
+            }
+        if jurisdiction == "FL" and "respondent.employer_hours" not in answers:
+            return {
+                "step": "respondent.employer_hours",
+                "prompt": "Working hours?",
+                "schema": {"type": "string"},
+            }
+
+        if jurisdiction in VEHICLE_DESCRIPTION_STATES:
+            if "respondent.vehicle_make_model" not in answers:
+                return {
+                    "step": "respondent.vehicle_make_model",
+                    "prompt": "Do they drive? What kind of car?",
+                    "schema": {"type": "string"},
+                }
+            if "respondent.vehicle_color" not in answers:
+                return {
+                    "step": "respondent.vehicle_color",
+                    "prompt": "Color?",
+                    "schema": {"type": "string"},
+                }
+            if "respondent.vehicle_plate" not in answers:
+                return {
+                    "step": "respondent.vehicle_plate",
+                    "prompt": "License plate, if you know?",
+                    "schema": {"type": "string"},
+                }
+
+        if jurisdiction in {"FL", "NY", "TX"} and "respondent.is_law_enforcement" not in answers:
+            return {
+                "step": "respondent.is_law_enforcement",
+                "prompt": (
+                    "Is their job one where they carry a firearm — police, military, security? "
+                    "It changes how some of the orders work."
+                ),
                 "schema": {"type": "boolean"},
             }
-        if "respondent.parental_rights_terminated" not in answers:
+        if jurisdiction == "FL" and "respondent.is_active_military" not in answers:
             return {
-                "step": "respondent.parental_rights_terminated",
-                "prompt": "Have their parental rights to a child in this case been terminated?",
+                "step": "respondent.is_active_military",
+                "prompt": (
+                    "Are they on active military duty right now? If yes, there's a federal law "
+                    "that gives them extra time to respond, and we should plan for it."
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if jurisdiction == "CA" and "respondent.immigration_status_known" not in answers:
+            return {
+                "step": "respondent.immigration_status_known",
+                "prompt": (
+                    "Do you know their immigration status? (We don't share this — "
+                    "it can affect what protections you have.)"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if (
+            jurisdiction in {"CA", "NY", "TX", "FL", "AR"}
+            and "respondent.prior_criminal_history" not in answers
+        ):
+            return {
+                "step": "respondent.prior_criminal_history",
+                "prompt": (
+                    "Has he/she/they ever been arrested or convicted of "
+                    "anything violent that you know of?"
+                ),
                 "schema": {"type": "boolean"},
             }
 
-    if (
-        answers.get("incidents[].police_called") is True
-        and jurisdiction in {"CA", "NY", "TX", "FL"}
-        and "incidents[].police_report_number" not in answers
-    ):
-        return {
-            "step": "incidents[].police_report_number",
-            "prompt": "Did the police take a report? Do you have a number or case number?",
-            "schema": {"type": "string"},
-        }
+        if jurisdiction == "TX":
+            if "respondent.prior_dv_finding" not in answers:
+                return {
+                    "step": "respondent.prior_dv_finding",
+                    "prompt": "Has a court ever found them guilty of family violence specifically?",
+                    "schema": {"type": "boolean"},
+                }
+            if "respondent.parental_rights_terminated" not in answers:
+                return {
+                    "step": "respondent.parental_rights_terminated",
+                    "prompt": "Have their parental rights to a child in this case been terminated?",
+                    "schema": {"type": "boolean"},
+                }
 
-    if answers.get("firearm.respondent_has_access") is True:
-        if "firearm.types[]" not in answers:
+        if (
+            answers.get("incidents[].police_called") is True
+            and jurisdiction in {"CA", "NY", "TX", "FL"}
+            and "incidents[].police_report_number" not in answers
+        ):
             return {
-                "step": "firearm.types[]",
-                "prompt": (
-                    "Do you know what kind? A handgun, a long gun, more than one? "
-                    "Whatever you can describe is useful."
-                ),
-                "schema": {"type": "array", "items": {"type": "string"}},
+                "step": "incidents[].police_report_number",
+                "prompt": "Did the police take a report? Do you have a number or case number?",
+                "schema": {"type": "string"},
             }
-        if "firearm.locations[]" not in answers:
-            return {
-                "step": "firearm.locations[]",
-                "prompt": (
-                    "Any idea where they're kept? Doesn't have to be exact — "
-                    "'in the truck,' 'somewhere in the bedroom,' 'his mom's house' all help."
-                ),
-                "schema": {"type": "array", "items": {"type": "string"}},
-            }
+
+        if answers.get("firearm.respondent_has_access") is True:
+            if "firearm.types[]" not in answers:
+                return {
+                    "step": "firearm.types[]",
+                    "prompt": (
+                        "Do you know what kind? A handgun, a long gun, more than one? "
+                        "Whatever you can describe is useful."
+                    ),
+                    "schema": {"type": "array", "items": {"type": "string"}},
+                }
+            if "firearm.locations[]" not in answers:
+                return {
+                    "step": "firearm.locations[]",
+                    "prompt": (
+                        "Any idea where they're kept? Doesn't have to be exact — "
+                        "'in the truck,' 'somewhere in the bedroom,' 'his mom's house' all help."
+                    ),
+                    "schema": {"type": "array", "items": {"type": "string"}},
+                }
+        return None
 
     # Remaining CA-specific DV-100 fields the Tier-2 blocks above don't cover:
     # respondent identity (2b-2e), marriage status (3c), extra incidents (6-7),
     # protected-people detail (8), and the orders requested (10-28) with their
     # details. CA only today (the jurisdiction with petition mapping in
     # vault.forms.ca); other states follow when their form module lands.
-    if jurisdiction == "CA":
+    def _ca_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         # Respondent identity (items 2b-2e) — the form asks, Tier-1 didn't.
         if "respondent.age" not in answers:
             return {
@@ -935,11 +971,12 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "array", "items": {"type": "string"}},
             }
+        return None
 
     # Washington PO 001 — WA-specific fields (items 3, 9, 12-17, 19-24). WA's
     # restraints (item 14) are its own list, distinct from CA's relief set. Maps
     # in vault.forms.wa. CA's analogous block is gated above; this is WA's.
-    if jurisdiction == "WA":
+    def _wa_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -1134,11 +1171,12 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     },
                 },
             }
+        return None
 
     # Virginia DC-383 — VA-specific fields: respondent description (DOB/race/sex),
     # the preliminary-order request, and the conditions requested. Maps in
     # vault.forms.va. DC-383 is a simpler form than CA's or WA's.
-    if jurisdiction == "VA":
+    def _va_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -1203,12 +1241,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other condition do you want the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Texas Application for Protective Order — TX's terms-and-conditions section
     # (item 8 a-n) plus ex parte, confidentiality, support, and children orders.
     # TX's terms are its own list, distinct from CA's and WA's. Maps in
     # vault.forms.tx.
-    if jurisdiction == "TX":
+    def _tx_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "tx.terms" not in answers:
             return {
                 "step": "tx.terms",
@@ -1352,10 +1391,11 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "boolean"},
             }
+        return None
 
     # Pennsylvania Petition for Protection from Abuse (PFA) — defendant
     # identifiers and PA's A-P relief list. Maps in vault.forms.pa_pfa.
-    if jurisdiction == "PA":
+    def _pa_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -1440,10 +1480,11 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # North Carolina Complaint for DV Protective Order (AOC-CV-303, G.S. 50B) —
     # county of residence and NC's 1-17 relief list. Maps in vault.forms.nc.
-    if jurisdiction == "NC":
+    def _nc_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "nc.county" not in answers:
             return {
                 "step": "nc.county",
@@ -1529,12 +1570,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # New York Family Offense Petition (UCS-FC8-2, FCA 821) — county and the
     # item-10 relief list. The offense checklist (item 4) is a legal
     # characterization left to the attorney, not collected here. Maps in
     # vault.forms.ny.
-    if jurisdiction == "NY":
+    def _ny_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "ny.county" not in answers:
             return {
                 "step": "ny.county",
@@ -1567,12 +1609,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     },
                 },
             }
+        return None
 
     # Massachusetts Chapter 209A Complaint for Protection from Abuse — defendant
     # identifiers (for the Defendant Information Form), the nature-of-abuse boxes,
     # and the request-for-relief list (which includes keeping the survivor's
     # address off the order). Maps in vault.forms.ma.
-    if jurisdiction == "MA":
+    def _ma_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -1689,11 +1732,12 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other order would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Maryland Petition for Protection from Domestic Violence (CC-DC-DV-001,
     # FL § 4-504) — respondent description (for the CC-DC-DV-001A addendum), the
     # acts-of-abuse checklist, and the relief list. Maps in vault.forms.md.
-    if jurisdiction == "MD":
+    def _md_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -1821,11 +1865,12 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other order would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Hawai'i Petition for an Order for Protection (1F-P-752A, HRS ch. 586) —
     # the acts-of-abuse checklist, the harm-type classification, the section II
     # relief requests, and order duration. Maps in vault.forms.hi.
-    if jurisdiction == "HI":
+    def _hi_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "hi.abuse_acts" not in answers:
             return {
                 "step": "hi.abuse_acts",
@@ -1917,12 +1962,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "string"},
             }
+        return None
 
     # Georgia Petition for Family Violence Protective Order (SC-26, O.C.G.A.
     # § 19-13) — respondent identifiers (for the sealed fact sheet), county, and
     # GA's relief list (which includes keeping the address confidential). Maps in
     # vault.forms.ga.
-    if jurisdiction == "GA":
+    def _ga_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2017,13 +2063,14 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # West Virginia Domestic Violence Petition for Temporary Emergency Protective
     # (TEPO) Order (MDVTPET, W. Va. Code § 48-27) — respondent identifiers, county,
     # the item-8 acts checklist, the requested PO duration (with § 505 reasons),
     # and WV's permissive-relief list. WV's relief list is its own. Maps in
     # vault.forms.wv.
-    if jurisdiction == "WV":
+    def _wv_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2141,12 +2188,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What changes to visitation would you want? Be specific.",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Wisconsin Petition for TRO and/or Injunction Hearing (Domestic Abuse)
     # (CV-402, § 813.12 Wis. Stats.) — respondent identifiers, county, imminent
     # danger, and WI's relief (TRO items 1a-f, mirrored as injunction items 2a-f,
     # plus items 4-7). WI's relief list is its own. Maps in vault.forms.wi.
-    if jurisdiction == "WI":
+    def _wi_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2243,12 +2291,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     },
                 },
             }
+        return None
 
     # Wyoming Petition for Domestic Violence Order of Protection (PO DV Form 03,
     # W.S. § 35-21-101 to 112) — respondent identifiers, county/judicial district,
     # respondent probation, and WY's paragraph-11 relief list (A-T). WY's relief
     # list is its own. Maps in vault.forms.wy.
-    if jurisdiction == "WY":
+    def _wy_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2431,12 +2480,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "string", "enum": ["in_person", "virtual"]},
             }
+        return None
 
     # Alabama Petition for Protection from Abuse (Form C-2, Ala. Code § 30-5-1
     # et seq.) — the county, the request type, the section-II acts checklist, the
     # VII ex parte relief and VIII final relief lists. AL's acts and relief lists
     # are its own. Maps in vault.forms.al.
-    if jurisdiction == "AL":
+    def _al_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2618,12 +2668,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider at the hearing?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Alaska Petition for Domestic Violence Protective Order (DV-100, AS
     # 18.66.100-.990) — court location, the 20-day/long-term order type, the
     # short-term (§5) and long-term (§6) protections, and law-enforcement
     # assistance (§9). AK's protection lists are its own. Maps in vault.forms.ak.
-    if jurisdiction == "AK":
+    def _ak_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2816,12 +2867,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     },
                 },
             }
+        return None
 
     # Arkansas Petition and Affidavit for an Order of Protection (A.C.A.
     # § 9-15-101 et seq.) — respondent identifiers, the county, and AR's item-8
     # ex parte order provisions. AR's relief list is its own. Maps in
     # vault.forms.ar.
-    if jurisdiction == "AR":
+    def _ar_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -2910,12 +2962,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "string"},
             }
+        return None
 
     # Colorado Complaint/Motion for Civil Protection Order (JDF 402, C.R.S.
     # § 13-14-101 et seq.) — the county, the statutory basis (item 1), imminent
     # danger (item 5), and CO's item-7 relief list (a-i). CO's basis and relief
     # lists are its own. Maps in vault.forms.co.
-    if jurisdiction == "CO":
+    def _co_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "co.county" not in answers:
             return {
                 "step": "co.county",
@@ -3049,12 +3102,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the court to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Connecticut Application for Relief from Abuse (JD-FM-137, C.G.S. § 46b-15
     # et al.) — respondent identifiers, the judicial district, and CT's coded
     # relief conditions (CT01-CT31) plus custody/visitation and ex parte. CT's
     # relief list is its own. Maps in vault.forms.ct.
-    if jurisdiction == "CT":
+    def _ct_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -3143,12 +3197,13 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 ),
                 "schema": {"type": "boolean"},
             }
+        return None
 
     # Washington, D.C. Petition and Affidavit for Civil Protection Order (CPO,
     # D.C. Code § 16-1001 et seq.) — the DC nexus questions (the court's basis to
     # hear the case) and the item 1-16 relief list. DC's relief list is its own.
     # Maps in vault.forms.dc.
-    if jurisdiction == "DC":
+    def _dc_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "dc.petitioner_dc_nexus" not in answers:
             return {
                 "step": "dc.petitioner_dc_nexus",
@@ -3325,13 +3380,14 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
     # Delaware Petition for Order of Protection from Abuse (Family Court Form 450,
     # 10 Del. C. § 1041 et seq.) — the county (DE has three), the respondent's DE
     # residency basis for jurisdiction, the acts-of-abuse checklist (a-k), and the
     # protective + ancillary relief list. DE's abuse and relief lists are its own.
     # Maps in vault.forms.de.
-    if jurisdiction == "DE":
+    def _de_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "respondent.dob" not in answers:
             return {
                 "step": "respondent.dob",
@@ -3530,6 +3586,941 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                     },
                 },
             }
+        return None
+
+    # Utah Request for Protective Order (Utah Code 78B-7-601 et seq.; District
+    # Court). The form has no printed form number. It carries a "Describe
+    # Respondent" block (sex/race/DOB + the shared physical description),
+    # respondent vehicle, a violent-past and probation/parole question, an item-6
+    # imminent-fear declaration, and a large items 8-25 relief checklist (personal
+    # conduct through guardian-ad-litem) with sub-detail. UT is in the shared
+    # PHYSICAL_DESCRIPTION_STATES and VEHICLE_DESCRIPTION_STATES sets, so those
+    # gates run above; this block adds the rest. UT's relief list is its own. Maps
+    # in vault.forms.ut.
+    def _ut_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": (
+                    "The form asks for the other person's date of birth. "
+                    "Write what you know — 'unknown' is fine if you don't."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "The form asks the other person's sex. What should it say?",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": (
+                    "It also asks their race. You can write what fits, or 'unknown.'"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "ut.county" not in answers:
+            return {
+                "step": "ut.county",
+                "prompt": (
+                    "Which Utah county will you file in? (Usually the one you live in — "
+                    "the court sorts out the district number.)"
+                ),
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "ut.respondent_violent_past" not in answers:
+            return {
+                "step": "ut.respondent_violent_past",
+                "prompt": (
+                    "Has the other person used weapons or been violent in the past? "
+                    "'Don't know' is a real answer."
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if (
+            answers.get("ut.respondent_violent_past") is True
+            and "ut.respondent_violent_detail" not in answers
+        ):
+            return {
+                "step": "ut.respondent_violent_detail",
+                "prompt": "Can you describe that — what happened, and any weapons?",
+                "schema": {"type": "string"},
+            }
+        if "ut.respondent_probation" not in answers:
+            return {
+                "step": "ut.respondent_probation",
+                "prompt": "Is the other person on probation or parole, as far as you know?",
+                "schema": {"type": "boolean"},
+            }
+        if (
+            answers.get("ut.respondent_probation") is True
+            and "ut.respondent_probation_detail" not in answers
+        ):
+            return {
+                "step": "ut.respondent_probation_detail",
+                "prompt": (
+                    "If you know it — the probation/parole agency, the officer's name, "
+                    "and a phone number?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "ut.fear_imminent" not in answers:
+            return {
+                "step": "ut.fear_imminent",
+                "prompt": (
+                    "Apart from what you've already told me, are you afraid the other person "
+                    "is likely to physically harm you very soon?"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if (
+            answers.get("ut.fear_imminent") is True
+            and "ut.fear_imminent_detail" not in answers
+        ):
+            return {
+                "step": "ut.fear_imminent_detail",
+                "prompt": (
+                    "Tell me why, in your own words — what makes you afraid it'll happen soon?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "ut.relief" not in answers:
+            return {
+                "step": "ut.relief",
+                "prompt": (
+                    "Now the orders you'd like to ask the judge for. Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "personal_conduct",  # 8 — no violence/abuse
+                            "no_contact",  # 9 — no contact in any way
+                            "contact_mediation",  # 10 — contact only during mediation
+                            "stay_away",  # 11 — stay away from places/people
+                            "no_weapons",  # 12 — no guns/weapons
+                            "property_control_petitioner",  # 13 — petitioner controls home/car
+                            "property_control_services",  # 14 — no interfering with services
+                            "no_harming_pets",  # 15 — no harming pets
+                            "transfer_wireless",  # 16 — transfer wireless numbers
+                            "custody",  # 17 — child custody & parent-time
+                            "no_alcohol_drugs",  # 18 — no alcohol/drugs before visitation
+                            "supervised_visitation",  # 19 — supervised parent-time
+                            "travel_restrictions",  # 20 — no taking children out of UT
+                            "support_expenses",  # 21 — child/spousal support & expenses
+                            "other_assistance",  # 22 — other orders needed
+                            "law_enforcement_assist",  # 23 — order to law enforcement
+                            "investigate_child_abuse",  # 24 — refer to DCFS
+                            "guardian_children",  # 25 — appoint guardian ad litem
+                        ],
+                    },
+                },
+            }
+        ut_relief = answers.get("ut.relief", [])
+        if "stay_away" in ut_relief and "ut.stay_away_distance" not in answers:
+            return {
+                "step": "ut.stay_away_distance",
+                "prompt": (
+                    "For the stay-away order — how far away should they have to keep from you? "
+                    "Whatever distance you'd want is fine."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "stay_away" in ut_relief and "ut.stay_away_locations" not in answers:
+            return {
+                "step": "ut.stay_away_locations",
+                "prompt": (
+                    "Which places should they stay away from? Pick any. (The court can't keep "
+                    "them from a place you both work, go to school, or worship — but tell us "
+                    "anyway and a judge will weigh it.)"
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["home", "work", "school", "worship", "other"],
+                    },
+                },
+            }
+        if (
+            "other" in answers.get("ut.stay_away_locations", [])
+            and "ut.stay_away_other" not in answers
+        ):
+            return {
+                "step": "ut.stay_away_other",
+                "prompt": "Which other place should they be ordered to stay away from?",
+                "schema": {"type": "string"},
+            }
+        if "no_weapons" in ut_relief and "ut.weapons_detail" not in answers:
+            return {
+                "step": "ut.weapons_detail",
+                "prompt": (
+                    "Are there particular weapons the order should name? "
+                    "List any you know about, or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        if (
+            "property_control_petitioner" in ut_relief
+            and "ut.property_home_address" not in answers
+        ):
+            return {
+                "step": "ut.property_home_address",
+                "prompt": "What's the address of the home you want for yourself?",
+                "schema": {"type": "string"},
+            }
+        if (
+            "property_control_petitioner" in ut_relief
+            and "ut.property_belongings" not in answers
+        ):
+            return {
+                "step": "ut.property_belongings",
+                "prompt": (
+                    "Which car or essential belongings do you need control of? "
+                    "List whatever matters."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "custody" in ut_relief and "ut.custody_to" not in answers:
+            return {
+                "step": "ut.custody_to",
+                "prompt": (
+                    "Who should have temporary custody of the children — you, or someone else?"
+                ),
+                "schema": {"type": "string", "enum": ["petitioner", "other"]},
+            }
+        if answers.get("ut.custody_to") == "other" and "ut.custody_other_name" not in answers:
+            return {
+                "step": "ut.custody_other_name",
+                "prompt": "Who is that person? A name is enough.",
+                "schema": {"type": "string"},
+            }
+        if "custody" in ut_relief and "ut.parent_time" not in answers:
+            return {
+                "step": "ut.parent_time",
+                "prompt": (
+                    "What parent-time (visitation) should the other person get, if any? "
+                    "Describe what you think is safe."
+                ),
+                "schema": {"type": "string"},
+            }
+        if (
+            "supervised_visitation" in ut_relief
+            and "ut.supervised_visitation_detail" not in answers
+        ):
+            return {
+                "step": "ut.supervised_visitation_detail",
+                "prompt": (
+                    "Who should supervise the visits — an agency or a person? "
+                    "A name and phone number, if you have them."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "support_expenses" in ut_relief and "ut.support_types" not in answers:
+            return {
+                "step": "ut.support_types",
+                "prompt": (
+                    "Which kinds of support or expenses should the judge order? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "child_support",  # 21a
+                            "spousal_support",  # 21b
+                            "income_withholding",  # 21c
+                            "childcare_half",  # 21d — 50% childcare
+                            "medical_half",  # 21e — 50% medical
+                            "abuse_medical",  # 21f — abuse-related medical costs
+                        ],
+                    },
+                },
+            }
+        ut_support = answers.get("ut.support_types", [])
+        if "child_support" in ut_support and "ut.child_support_amount" not in answers:
+            return {
+                "step": "ut.child_support_amount",
+                "prompt": (
+                    "How much monthly child support are you asking for, if you have a number?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "spousal_support" in ut_support and "ut.spousal_support_amount" not in answers:
+            return {
+                "step": "ut.spousal_support_amount",
+                "prompt": "And how much monthly spousal support?",
+                "schema": {"type": "string"},
+            }
+        if "transfer_wireless" in ut_relief and "ut.wireless_numbers" not in answers:
+            return {
+                "step": "ut.wireless_numbers",
+                "prompt": (
+                    "Which wireless phone number(s) should be transferred to you? "
+                    "List the numbers the other person currently holds the account for."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "law_enforcement_assist" in ut_relief and "ut.law_enforcement_tasks" not in answers:
+            return {
+                "step": "ut.law_enforcement_tasks",
+                "prompt": (
+                    "What should law enforcement help with? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "control_property",  # 23a
+                            "obtain_custody",  # 23b
+                            "remove_belongings",  # 23c
+                        ],
+                    },
+                },
+            }
+        if "other_assistance" in ut_relief and "ut.other_assistance_detail" not in answers:
+            return {
+                "step": "ut.other_assistance_detail",
+                "prompt": "What other orders would help keep you and others safe?",
+                "schema": {"type": "string"},
+            }
+        return None
+
+    # Vermont Complaint for Relief from Abuse (form 400-00150C, 15 V.S.A. § 1101
+    # et seq.) — the Superior Court Family Division unit, the existing-proceedings
+    # matrix, an acts-of-abuse checklist (item 1), and TWO distinct relief lists:
+    # Emergency Relief and Final Order (which differ — Final adds living expenses,
+    # child support, and pet possession; Emergency has pet no-cruelty instead). VT
+    # has no physical/vehicle/interpreter/disability fields, so none of the shared
+    # Tier-2 gates apply. VT's acts and relief lists are its own. Maps in
+    # vault.forms.vt.
+    def _vt_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "vt.unit" not in answers:
+            return {
+                "step": "vt.unit",
+                "prompt": (
+                    "Vermont's Family Division is organized by county. "
+                    "Which one will you file in — usually the one you live in?"
+                ),
+                "schema": {
+                    "type": "string",
+                    "enum": [
+                        "addison",
+                        "bennington",
+                        "caledonia",
+                        "chittenden",
+                        "essex",
+                        "franklin",
+                        "grand_isle",
+                        "lamoille",
+                        "orange",
+                        "orleans",
+                        "rutland",
+                        "washington",
+                        "windham",
+                        "windsor",
+                    ],
+                },
+            }
+        if "vt.existing_proceedings" not in answers:
+            return {
+                "step": "vt.existing_proceedings",
+                "prompt": (
+                    "Are there any other court cases — open or finished — involving you, the "
+                    "other person, or your children? Pick any that apply, or leave it empty."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "divorce_separation",
+                            "civil_union_dissolution",
+                            "relief_from_abuse",
+                            "criminal",
+                            "parentage",
+                            "guardianship",
+                            "juvenile_dcf",
+                        ],
+                    },
+                },
+            }
+        if (
+            answers.get("vt.existing_proceedings")
+            and "vt.existing_proceedings_where" not in answers
+        ):
+            return {
+                "step": "vt.existing_proceedings_where",
+                "prompt": "Which state and county is that case (or those cases) in?",
+                "schema": {"type": "string"},
+            }
+        if "vt.abuse_acts" not in answers:
+            return {
+                "step": "vt.abuse_acts",
+                "prompt": (
+                    "Which of these describe what happened? Pick any that fit — "
+                    "you can choose more than one."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "physical_harm",  # attempted to cause or caused physical harm
+                            "fear_serious_harm",  # fear of imminent serious physical harm
+                            "child_abuse",  # abused the child(ren) named above
+                            "stalking",  # stalked (form cites 12 V.S.A. 5131(6))
+                            "sexual_assault",  # sexually assaulted (form cites 15 V.S.A. 5131(5))
+                        ],
+                    },
+                },
+            }
+        if "stalking" in answers.get("vt.abuse_acts", []) and "vt.stalking_dates" not in answers:
+            return {
+                "step": "vt.stalking_dates",
+                "prompt": (
+                    "For the stalking, the form asks for the dates it happened. "
+                    "What dates do you remember? Anything you've got is fine."
+                ),
+                "schema": {"type": "string"},
+            }
+        children = answers.get("protected_persons.children[]")
+        has_children = isinstance(children, str) and children.strip().lower() not in ("", "none")
+        if has_children and "vt.includes_children" not in answers:
+            return {
+                "step": "vt.includes_children",
+                "prompt": (
+                    "Do you want the order to protect your children too, not just you?"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if "vt.defendant_incarcerated" not in answers:
+            return {
+                "step": "vt.defendant_incarcerated",
+                "prompt": (
+                    "Is the other person in jail or prison right now for a violent crime? "
+                    "'Don't know' is a real answer — this just changes some timing."
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if "vt.public_assistance" not in answers:
+            return {
+                "step": "vt.public_assistance",
+                "prompt": (
+                    "Has either of you ever received public assistance — like Reach Up, "
+                    "SNAP, or Medicaid? The form asks."
+                ),
+                "schema": {"type": "string", "enum": ["plaintiff", "defendant", "neither"]},
+            }
+        if "vt.emergency_relief" not in answers:
+            return {
+                "step": "vt.emergency_relief",
+                "prompt": (
+                    "First, the emergency orders — what you'd want the judge to do right away, "
+                    "before any hearing. Pick whatever fits; we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_abuse",  # not abuse + not interfere with personal liberty
+                            "refrain_stalking_sa",  # refrain from stalking / sexually assaulting
+                            "leave_residence",  # leave residence + sole possession to plaintiff
+                            "parental_rights",  # temporary parental rights & responsibilities
+                            "no_pet_cruelty",  # refrain from cruelly treating pets
+                            "stay_away",  # remain a set distance away
+                            "no_contact",  # may not contact in any way
+                            "other",  # other emergency relief
+                        ],
+                    },
+                },
+            }
+        if "vt.final_relief" not in answers:
+            return {
+                "step": "vt.final_relief",
+                "prompt": (
+                    "Now the final order — what you'd want after a hearing, for the longer "
+                    "term. Pick whatever fits."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_abuse",  # not abuse + not interfere with personal liberty
+                            "refrain_stalking_sa",  # refrain from stalking / sexually assaulting
+                            "leave_residence",  # leave residence + sole possession to plaintiff
+                            "parental_rights",  # temporary parental rights & responsibilities
+                            "pet_possession",  # possession & control of pets to plaintiff
+                            "stay_away",  # remain a set distance away
+                            "no_contact",  # may not contact in any way
+                            "living_expenses",  # temporary living expenses
+                            "child_support",  # temporary child support
+                            "other",  # other final relief
+                        ],
+                    },
+                },
+            }
+        vt_emergency = answers.get("vt.emergency_relief", [])
+        vt_final = answers.get("vt.final_relief", [])
+        if (
+            ("stay_away" in vt_emergency or "stay_away" in vt_final)
+            and "vt.stay_away_distance" not in answers
+        ):
+            return {
+                "step": "vt.stay_away_distance",
+                "prompt": (
+                    "For the stay-away order — how far away should they have to keep? "
+                    "Courts often use a number of feet; whatever you'd want is fine."
+                ),
+                "schema": {"type": "string"},
+            }
+        if (
+            ("leave_residence" in vt_emergency or "leave_residence" in vt_final)
+            and "vt.residence_address" not in answers
+        ):
+            return {
+                "step": "vt.residence_address",
+                "prompt": "What's the address of the home you want them ordered to leave?",
+                "schema": {"type": "string"},
+            }
+        if (
+            ("leave_residence" in vt_emergency or "leave_residence" in vt_final)
+            and "vt.residence_tenure" not in answers
+        ):
+            return {
+                "step": "vt.residence_tenure",
+                "prompt": "Is that home owned, or rented/leased?",
+                "schema": {"type": "string", "enum": ["owned", "rented_leased"]},
+            }
+        if (
+            ("leave_residence" in vt_emergency or "leave_residence" in vt_final)
+            and "vt.residence_in_name" not in answers
+        ):
+            return {
+                "step": "vt.residence_in_name",
+                "prompt": "Whose name is it in?",
+                "schema": {
+                    "type": "string",
+                    "enum": ["plaintiff", "defendant", "both", "other"],
+                },
+            }
+        if "other" in vt_emergency and "vt.emergency_other" not in answers:
+            return {
+                "step": "vt.emergency_other",
+                "prompt": "What other emergency relief would you like the judge to consider?",
+                "schema": {"type": "string"},
+            }
+        if "other" in vt_final and "vt.final_other" not in answers:
+            return {
+                "step": "vt.final_other",
+                "prompt": "What other final relief would you like the judge to consider?",
+                "schema": {"type": "string"},
+            }
+        return None
+
+    # South Dakota Petition and Affidavit for a Protection Order (Domestic Abuse)
+    # (Form UJS-091A / -091AJ juvenile, SDCL ch. 25-10) — county, the acts-of-abuse
+    # checklist, prior-PO and weapon history (yes/no/don't-know), and the items 1-11
+    # relief list plus the ex-parte (immediate TPO) request. SD is in the shared
+    # MINOR_FILING_STATES set (the form has a juvenile version + under-18 path) but
+    # not the physical/vehicle sets (the form describes neither). SD's relief list
+    # is its own. Maps in vault.forms.sd.
+    def _sd_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "sd.county" not in answers:
+            return {
+                "step": "sd.county",
+                "prompt": (
+                    "Which South Dakota county will you file in? (Usually the one you live in.)"
+                ),
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "sd.existing_custody_order" not in answers:
+            return {
+                "step": "sd.existing_custody_order",
+                "prompt": (
+                    "Is there already a custody order — in South Dakota or any other state — "
+                    "for your children with the other person?"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if (
+            answers.get("sd.existing_custody_order") is True
+            and "sd.custody_order_details" not in answers
+        ):
+            return {
+                "step": "sd.custody_order_details",
+                "prompt": "Which county and case number is that custody order, if you know it?",
+                "schema": {"type": "string"},
+            }
+        if "sd.abuse_acts" not in answers:
+            return {
+                "step": "sd.abuse_acts",
+                "prompt": (
+                    "Which of these describe what happened? Pick any that fit — "
+                    "you can choose more than one."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "caused_harm",  # caused physical harm / bodily injury
+                            "attempted_harm",  # attempted to cause physical harm
+                            "inflicted_fear",  # fear of imminent physical harm
+                            "violated_po",  # violated a protection order
+                            "followed",  # willfully/repeatedly followed (stalking)
+                            "harassing_conduct",  # course of conduct that alarmed/harassed
+                            "credible_threat",  # credible threat of death/great bodily injury
+                            "harassing_communication",  # repeated harassing communication
+                            "crime_of_violence",  # committed a crime of violence
+                        ],
+                    },
+                },
+            }
+        if "sd.respondent_arrested" not in answers:
+            return {
+                "step": "sd.respondent_arrested",
+                "prompt": "Was the other person arrested for this incident?",
+                "schema": {"type": "string", "enum": ["yes", "no", "dont_know"]},
+            }
+        if "sd.respondent_in_jail" not in answers:
+            return {
+                "step": "sd.respondent_in_jail",
+                "prompt": "As far as you know, is the other person in jail right now?",
+                "schema": {"type": "string", "enum": ["yes", "no", "dont_know"]},
+            }
+        if "sd.respondent_violated_po" not in answers:
+            return {
+                "step": "sd.respondent_violated_po",
+                "prompt": "Has the other person ever violated a protection order?",
+                "schema": {"type": "string", "enum": ["yes", "no", "dont_know"]},
+            }
+        if (
+            answers.get("sd.respondent_violated_po") == "yes"
+            and "sd.violated_po_whom" not in answers
+        ):
+            return {
+                "step": "sd.violated_po_whom",
+                "prompt": "Who was that protection order protecting?",
+                "schema": {"type": "string"},
+            }
+        if "sd.respondent_convicted_po" not in answers:
+            return {
+                "step": "sd.respondent_convicted_po",
+                "prompt": (
+                    "Has the other person ever been found guilty of violating a protection order?"
+                ),
+                "schema": {"type": "string", "enum": ["yes", "no", "dont_know"]},
+            }
+        if (
+            answers.get("sd.respondent_convicted_po") == "yes"
+            and "sd.convicted_po_details" not in answers
+        ):
+            return {
+                "step": "sd.convicted_po_details",
+                "prompt": (
+                    "If you know it — who it protected, the date of the conviction, and the "
+                    "county and state?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "sd.respondent_threatened_weapon" not in answers:
+            return {
+                "step": "sd.respondent_threatened_weapon",
+                "prompt": "Has the other person ever threatened anyone with a weapon?",
+                "schema": {"type": "string", "enum": ["yes", "no", "dont_know"]},
+            }
+        if "sd.relief" not in answers:
+            return {
+                "step": "sd.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "restrain_abuse",  # 1 — restrain from abuse/threats/stalking
+                            "set_duration",  # 2 — order for a period (up to 5 years)
+                            "exclude_residence",  # 3 — exclude respondent from residence
+                            "stay_away",  # 4 — stay-away distance from persons/places
+                            "custody",  # 5 — temporary custody of children
+                            "visitation",  # 6 — temporary visitation for respondent
+                            "support",  # 7 — child/spousal support
+                            "parenting_classes",  # 8 — parenting classes (SDCL 25-10-5)
+                            "counseling",  # 9 — respondent obtain counseling
+                            "no_contact",  # 10 — no contact, direct or indirect
+                            "other",  # 11 — other relief
+                        ],
+                    },
+                },
+            }
+        sd_relief = answers.get("sd.relief", [])
+        if "set_duration" in sd_relief and "sd.duration" not in answers:
+            return {
+                "step": "sd.duration",
+                "prompt": (
+                    "How long would you like the order to last? South Dakota allows up to "
+                    "five years."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "exclude_residence" in sd_relief and "sd.residence_address" not in answers:
+            return {
+                "step": "sd.residence_address",
+                "prompt": (
+                    "What's the address of the residence you want the other person kept out of?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "stay_away" in sd_relief and "sd.stay_away_distance" not in answers:
+            return {
+                "step": "sd.stay_away_distance",
+                "prompt": (
+                    "For the stay-away order — how far away should they have to keep? "
+                    "Whatever distance you'd want is fine."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "stay_away" in sd_relief and "sd.stay_away_targets" not in answers:
+            return {
+                "step": "sd.stay_away_targets",
+                "prompt": "What should they stay away from? Pick any.",
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["petitioner", "children", "residence", "employment", "other"],
+                    },
+                },
+            }
+        if (
+            "other" in answers.get("sd.stay_away_targets", [])
+            and "sd.stay_away_other" not in answers
+        ):
+            return {
+                "step": "sd.stay_away_other",
+                "prompt": "Which other place should they be ordered to stay away from?",
+                "schema": {"type": "string"},
+            }
+        if "visitation" in sd_relief and "sd.visitation_detail" not in answers:
+            return {
+                "step": "sd.visitation_detail",
+                "prompt": (
+                    "What visitation should the other person get, if any? Describe what you "
+                    "think is safe — supervised, an existing order, or something else."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "support" in sd_relief and "sd.support_types" not in answers:
+            return {
+                "step": "sd.support_types",
+                "prompt": "Which kind of support should the judge order? Pick any.",
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["child_support", "spousal_support"],
+                    },
+                },
+            }
+        sd_support = answers.get("sd.support_types", [])
+        if "child_support" in sd_support and "sd.child_support_amount" not in answers:
+            return {
+                "step": "sd.child_support_amount",
+                "prompt": (
+                    "How much monthly child support are you asking for, if you have a number?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "spousal_support" in sd_support and "sd.spousal_support_amount" not in answers:
+            return {
+                "step": "sd.spousal_support_amount",
+                "prompt": "And how much monthly spousal support?",
+                "schema": {"type": "string"},
+            }
+        if "counseling" in sd_relief and "sd.counseling_detail" not in answers:
+            return {
+                "step": "sd.counseling_detail",
+                "prompt": "What kind of counseling should the other person be ordered to get?",
+                "schema": {"type": "string"},
+            }
+        if "other" in sd_relief and "sd.other_relief" not in answers:
+            return {
+                "step": "sd.other_relief",
+                "prompt": "What other relief would help keep you and others safe?",
+                "schema": {"type": "string"},
+            }
+        if "sd.ex_parte" not in answers:
+            return {
+                "step": "sd.ex_parte",
+                "prompt": (
+                    "Do you want to ask for an immediate temporary order now, before any "
+                    "hearing and without notice to the other person?"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if answers.get("sd.ex_parte") is True and "sd.ex_parte_reasons" not in answers:
+            return {
+                "step": "sd.ex_parte_reasons",
+                "prompt": (
+                    "Why do you need protection right now, before a hearing? What immediate "
+                    "harm are you worried about if you have to wait?"
+                ),
+                "schema": {"type": "string"},
+            }
+        return None
+
+    # Tennessee Petition for Order of Protection and Order for Hearing (Form
+    # #OP2018-1, TCA § 36-3-601 et seq.) — county, the describe-respondent identity
+    # (sex/race/DOB on top of the shared physical block), and TN's items 7-19
+    # relief checklist with sub-detail, plus the ex-parte (TPO) request. TN is in
+    # the shared PHYSICAL_DESCRIPTION_STATES and MINOR_FILING_STATES sets (both
+    # match the form); it was omitted from VEHICLE_DESCRIPTION_STATES (the form has
+    # no vehicle field). TN's relief list is its own. Maps in vault.forms.tn.
+    def _tn_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "The form asks the other person's sex. What should it say?",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": "It also asks their race. You can write what fits, or skip.",
+                "schema": {"type": "string"},
+            }
+        if "tn.county" not in answers:
+            return {
+                "step": "tn.county",
+                "prompt": (
+                    "Which Tennessee county will you file in? (Usually the one you live in.)"
+                ),
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "tn.relief" not in answers:
+            return {
+                "step": "tn.relief",
+                "prompt": (
+                    "What would you like the judge to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_contact",  # 7 — no contact
+                            "stay_away",  # 8 — stay away from places
+                            "personal_conduct",  # 9 — no property damage / harming animals
+                            "temporary_custody",  # 10 — temporary custody of children
+                            "child_support",  # 11 — reasonable child support
+                            "spousal_support",  # 12 — spousal support (if married)
+                            "move_out",  # 13 — move out / provide other housing
+                            "counseling",  # 14 — batterers' / counseling program
+                            "no_firearms",  # 15 — no firearms
+                            "animals",  # 16 — custody/control of animals
+                            "costs_fees",  # 17 — costs, fees, litigation taxes
+                            "transfer_wireless",  # 18 — transfer wireless number(s)
+                            "other",  # 19 — other orders (general relief)
+                        ],
+                    },
+                },
+            }
+        tn_relief = answers.get("tn.relief", [])
+        if "no_contact" in tn_relief and "tn.no_contact_who" not in answers:
+            return {
+                "step": "tn.no_contact_who",
+                "prompt": "Who should the no-contact order cover? Pick any.",
+                "schema": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["me", "children"]},
+                },
+            }
+        if "stay_away" in tn_relief and "tn.stay_away_places" not in answers:
+            return {
+                "step": "tn.stay_away_places",
+                "prompt": (
+                    "For the stay-away order — what should they keep away from? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["home", "workplace", "anywhere"],
+                    },
+                },
+            }
+        if "personal_conduct" in tn_relief and "tn.personal_conduct_types" not in answers:
+            return {
+                "step": "tn.personal_conduct_types",
+                "prompt": (
+                    "Which of these should the personal-conduct order include? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["property_utilities", "animals"],
+                    },
+                },
+            }
+        if "move_out" in tn_relief and "tn.move_out_choice" not in answers:
+            return {
+                "step": "tn.move_out_choice",
+                "prompt": (
+                    "For the housing order — should they move out of the home, or provide "
+                    "you other suitable housing (if you're married)?"
+                ),
+                "schema": {"type": "string", "enum": ["move_out", "provide_housing"]},
+            }
+        if "transfer_wireless" in tn_relief and "tn.wireless_numbers" not in answers:
+            return {
+                "step": "tn.wireless_numbers",
+                "prompt": (
+                    "Which wireless phone number(s) should be transferred to you? "
+                    "List the numbers the other person currently holds the account for."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "other" in tn_relief and "tn.other_relief" not in answers:
+            return {
+                "step": "tn.other_relief",
+                "prompt": "What other orders would help keep you and others safe?",
+                "schema": {"type": "string"},
+            }
+        if "tn.ex_parte" not in answers:
+            return {
+                "step": "tn.ex_parte",
+                "prompt": (
+                    "Do you want to ask for an immediate temporary order now, before any "
+                    "hearing? (In Tennessee that's an Ex Parte Order of Protection.)"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        return None
 
     # Florida Petition for Injunction for Protection Against Domestic Violence
     # (Fla. Sup. Ct. Approved Family Law Form 12.980(a), Fla. Stat. § 741.30) —
@@ -3537,7 +4528,7 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
     # blocks (race, gender, interpreter, disability, physical description,
     # vehicle, employer + hours, law-enforcement/military, prior criminal) are
     # gated above; this is FL's relief list, its own set. Maps in vault.forms.fl.
-    if jurisdiction == "FL":
+    def _fl_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
         if "fl.county" not in answers:
             return {
                 "step": "fl.county",
@@ -3582,29 +4573,503 @@ def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str,
                 "prompt": "What other relief would you like the judge to consider?",
                 "schema": {"type": "string"},
             }
+        return None
 
-    # FL collects the survivor's chosen orders as `fl.relief`, not the CA-style
-    # `selected_reliefs_intents`, so the support→SSN gate must read both.
-    requested_reliefs = answers.get("selected_reliefs_intents", [])
-    fl_relief = answers.get("fl.relief", [])
-    if (
-        jurisdiction in {"CA", "FL", "TX"}
-        and (
-            "child_support" in requested_reliefs
-            or "spousal_support" in requested_reliefs
-            or "child_support" in fl_relief
-            or "spousal_support" in fl_relief
-        )
-        and "petitioner.ssn" not in answers
-    ):
-        return {
-            "step": "petitioner.ssn",
-            "prompt": (
-                "Because you're asking the judge for support, the court needs your Social "
-                "Security number. It's encrypted on our end — only used when the petition "
-                "gets generated, and never shared anywhere else."
-            ),
-            "schema": {"type": "string", "pattern": r"^\d{3}-\d{2}-\d{4}$"},
-        }
+    # Rhode Island Complaint for an Order of Protection (FC-79, Family Court) —
+    # the county and case type, the defendant's DOB, RI's §7 abuse checklist and
+    # its relief list, plus the motion for an immediate ex parte order. RI's abuse
+    # and relief lists are its own. FC-79 has no respondent-description or vehicle
+    # block, so RI is NOT in PHYSICAL_DESCRIPTION_STATES/VEHICLE_DESCRIPTION_STATES.
+    # Maps in vault.forms.ri.
+    def _ri_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "ri.county" not in answers:
+            return {
+                "step": "ri.county",
+                "prompt": (
+                    "Which Rhode Island Family Court division will you file in? "
+                    "(Usually the county where you live.)"
+                ),
+                "schema": {
+                    "type": "string",
+                    "enum": ["Newport", "Washington", "Kent", "Providence/Bristol"],
+                },
+            }
+        if "ri.case_type" not in answers:
+            return {
+                "step": "ri.case_type",
+                "prompt": (
+                    "What kind of protection is this about? Pick whatever fits — "
+                    "we can adjust it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "domestic_abuse",
+                            "sexual_exploitation",
+                            "sexual_abuse",
+                            "domestic_abuse_juvenile",
+                        ],
+                    },
+                },
+            }
+        if "ri.former_residence" not in answers:
+            return {
+                "step": "ri.former_residence",
+                "prompt": (
+                    "Is there a home you've left to get away from them? If so, what was the "
+                    "address? You can skip this — it's only if it helps your case."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "ri.abuse_types" not in answers:
+            return {
+                "step": "ri.abuse_types",
+                "prompt": (
+                    "Which of these describes what happened? Pick any that fit — "
+                    "you don't have to relive the details, just check what's true."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "weapon",  # threatened/harmed with a weapon
+                            "attempted_harm",  # attempted physical harm
+                            "caused_harm",  # caused physical harm
+                            "fear_imminent",  # placed in fear of imminent harm
+                            "sexual_force",  # involuntary sexual relations by force
+                            "attempted_sexual",  # attempted involuntary sexual relations
+                            "stalking",  # stalked / cyberstalked / harassed
+                            "sexual_exploitation",  # sexually exploited / trafficked children
+                        ],
+                    },
+                },
+            }
+        if "weapon" in answers.get("ri.abuse_types", []) and "ri.weapon_detail" not in answers:
+            return {
+                "step": "ri.weapon_detail",
+                "prompt": "What was the weapon?",
+                "schema": {"type": "string"},
+            }
+        if "ri.relief" not in answers:
+            return {
+                "step": "ri.relief",
+                "prompt": (
+                    "What would you like the court to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_contact",  # restrain / enjoin from contact
+                            "surrender_firearms",  # surrender all firearms (72 hours)
+                            "vacate",  # vacate / remain out of household
+                            "no_utility_disruption",  # no terminating utility service
+                            "custody",  # temporary custody of minor children
+                            "child_support",  # child support (up to 90 days)
+                            "pets",  # safety/welfare of household animals
+                        ],
+                    },
+                },
+            }
+        ri_relief = answers.get("ri.relief", [])
+        if "vacate" in ri_relief and "ri.vacate_address" not in answers:
+            return {
+                "step": "ri.vacate_address",
+                "prompt": "What's the address of the home you want them to leave?",
+                "schema": {"type": "string"},
+            }
+        if "custody" in ri_relief and "ri.custody_children" not in answers:
+            return {
+                "step": "ri.custody_children",
+                "prompt": (
+                    "Which children should the temporary-custody order cover? "
+                    "A first name and age for each is enough."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "pets" in ri_relief and "ri.pets_detail" not in answers:
+            return {
+                "step": "ri.pets_detail",
+                "prompt": (
+                    "Tell me about the animals you want protected — "
+                    "a name and type is enough."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "ri.ex_parte" not in answers:
+            return {
+                "step": "ri.ex_parte",
+                "prompt": (
+                    "Do you want to ask for an immediate temporary order now, before any "
+                    "hearing? (In Rhode Island that's a Temporary Ex Parte Order of Protection, "
+                    "and the court sets a hearing within 21 days.)"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        return None
 
-    return {"step": "done", "jurisdiction": jurisdiction}
+    # Oregon FAPA Petition for Restraining Order to Prevent Abuse (ORS 107.700,
+    # Circuit Court) — the county, the defendant's DOB (the form needs the
+    # respondent's age), OR's §4 abuse grounds (within the past 180 days), the §6
+    # imminent-danger declaration, and OR's discretionary relief (firearms,
+    # move-out, emergency money, animals, custody assistance). OR's abuse and
+    # relief lists are its own. The FAPA petition has no respondent-description or
+    # vehicle block, so OR is NOT in PHYSICAL_DESCRIPTION_STATES/
+    # VEHICLE_DESCRIPTION_STATES; it IS in the interpreter set. Maps in
+    # vault.forms.oregon (named `oregon`, not `or`, since `or` is a keyword).
+    def _or_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "or.county" not in answers:
+            return {
+                "step": "or.county",
+                "prompt": (
+                    "Which Oregon county will you file in? (Usually the county where you live.)"
+                ),
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "or.abuse_types" not in answers:
+            return {
+                "step": "or.abuse_types",
+                "prompt": (
+                    "Has any of this happened in about the last six months? Pick any that "
+                    "fit — you don't have to relive the details, just check what's true."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "physical_injury",  # caused me physical injury
+                            "attempted_injury",  # tried to cause physical injury
+                            "fear_imminent",  # made me fear imminent injury
+                            "sexual_force",  # sexual relations against my will by force/threat
+                        ],
+                    },
+                },
+            }
+        if "or.imminent_danger" not in answers:
+            return {
+                "step": "or.imminent_danger",
+                "prompt": (
+                    "Oregon asks whether you're in danger of being hurt again soon. "
+                    "Do you feel that you are?"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if (
+            answers.get("or.imminent_danger") is True
+            and "or.imminent_danger_explain" not in answers
+        ):
+            return {
+                "step": "or.imminent_danger_explain",
+                "prompt": (
+                    "What makes you afraid they'll hurt you again soon? A sentence or two "
+                    "in your own words is enough."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "or.relief" not in answers:
+            return {
+                "step": "or.relief",
+                "prompt": (
+                    "What would you like the court to order, beyond telling them to stop? "
+                    "Pick whatever fits — there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "firearms_prohibit",  # 7 — no firearms / ammunition
+                            "move_out",  # 10 — move out of the residence
+                            "emergency_money",  # 11 — one-time emergency payment
+                            "animals",  # 12 — award companion/service animals
+                            "custody_assistance",  # 19 — peace-officer help with custody
+                        ],
+                    },
+                },
+            }
+        or_relief = answers.get("or.relief", [])
+        if "move_out" in or_relief and "or.move_out_basis" not in answers:
+            return {
+                "step": "or.move_out_basis",
+                "prompt": (
+                    "For the move-out order — which of these are true about the home? Pick any."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["sole_name", "joint_own", "joint_lease", "spouse_rdp"],
+                    },
+                },
+            }
+        if "emergency_money" in or_relief and "or.emergency_amount" not in answers:
+            return {
+                "step": "or.emergency_amount",
+                "prompt": (
+                    "For the emergency money — what one-time amount would you ask them to pay?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "emergency_money" in or_relief and "or.emergency_reason" not in answers:
+            return {
+                "step": "or.emergency_reason",
+                "prompt": "What's the money for?",
+                "schema": {"type": "string"},
+            }
+        if "animals" in or_relief and "or.animals_detail" not in answers:
+            return {
+                "step": "or.animals_detail",
+                "prompt": (
+                    "Tell me about the animals you want awarded to you — a name and type "
+                    "for each is enough."
+                ),
+                "schema": {"type": "string"},
+            }
+        return None
+
+    # Oklahoma AOC Petition for Protective Order (22 O.S. 60.1, District Court) —
+    # the describe-defendant identity (sex/race/DOB), the county, the §2
+    # jurisdiction statement, OK's §3 actions, the §6 emergency-ex-parte election,
+    # and OK's items 1-15 relief list. OK's actions and relief lists are its own.
+    # OK is in PHYSICAL_DESCRIPTION_STATES (the form has a Defendant Identifiers
+    # block) but was removed from VEHICLE_DESCRIPTION_STATES (the AOC form has no
+    # vehicle field). Maps in vault.forms.ok.
+    def _ok_step(self, answers: dict[str, Any]) -> dict[str, Any] | None:
+        if "respondent.dob" not in answers:
+            return {
+                "step": "respondent.dob",
+                "prompt": "Do you know the other person's date of birth? Skip if you don't.",
+                "schema": {"type": "string"},
+            }
+        if "respondent.gender" not in answers:
+            return {
+                "step": "respondent.gender",
+                "prompt": "The form asks the other person's sex. What should it say?",
+                "schema": {"type": "string"},
+            }
+        if "respondent.race" not in answers:
+            return {
+                "step": "respondent.race",
+                "prompt": "It also asks their race. You can write what fits, or skip.",
+                "schema": {"type": "string"},
+            }
+        if "ok.county" not in answers:
+            return {
+                "step": "ok.county",
+                "prompt": (
+                    "Which Oklahoma county will you file in? (Usually the one you live in.)"
+                ),
+                "schema": {"type": "string", "minLength": 1},
+            }
+        if "ok.jurisdiction_basis" not in answers:
+            return {
+                "step": "ok.jurisdiction_basis",
+                "prompt": (
+                    "Oklahoma asks why the case belongs in this county. Which is true — "
+                    "pick any: you live here, they live here, or the abuse happened here?"
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "petitioner_resident",
+                            "defendant_resident",
+                            "abuse_in_county",
+                        ],
+                    },
+                },
+            }
+        if "ok.actions" not in answers:
+            return {
+                "step": "ok.actions",
+                "prompt": (
+                    "Which of these has the other person done? Pick any that fit — "
+                    "you don't have to relive the details, just check what's true."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "physical_harm",  # caused/attempted physical harm
+                            "threatened_harm",  # threatened imminent physical harm
+                            "harassed",  # harassed
+                            "stalked",  # stalked
+                            "crime",  # rape/sodomy/sex offense/kidnapping/ABDW/child abuse/murder
+                            "adult_crime",  # other crime against an adult victim
+                        ],
+                    },
+                },
+            }
+        if "ok.ex_parte" not in answers:
+            return {
+                "step": "ok.ex_parte",
+                "prompt": (
+                    "Do you need protection to start right now, before a hearing, because "
+                    "you're in immediate danger? (Oklahoma calls this an Emergency Ex Parte "
+                    "Order.)"
+                ),
+                "schema": {"type": "boolean"},
+            }
+        if "ok.relief" not in answers:
+            return {
+                "step": "ok.relief",
+                "prompt": (
+                    "What would you like the court to order? Pick whatever fits — "
+                    "there's no wrong answer and we can change it later."
+                ),
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "no_contact",  # 1
+                            "no_abuse",  # 2
+                            "no_fear_conduct",  # 3
+                            "move_out",  # 4
+                            "le_remove_defendant",  # 5
+                            "civil_standby",  # 6
+                            "minor_defendant_leave",  # 7
+                            "suspend_visitation",  # 8
+                            "counseling",  # 9
+                            "protect_animals",  # 10
+                            "gps_monitoring",  # 11
+                            "transfer_utilities",  # 12
+                            "surrender_firearms",  # 13
+                            "pay_court_costs",  # 14
+                            "attorney_fees",  # 15
+                        ],
+                    },
+                },
+            }
+        ok_relief = answers.get("ok.relief", [])
+        if "move_out" in ok_relief and "ok.move_out_address" not in answers:
+            return {
+                "step": "ok.move_out_address",
+                "prompt": "What's the address of the home you want them ordered to leave?",
+                "schema": {"type": "string"},
+            }
+        if "civil_standby" in ok_relief and "ok.civil_standby_address" not in answers:
+            return {
+                "step": "ok.civil_standby_address",
+                "prompt": (
+                    "For the civil standby — what's the address where an officer would meet "
+                    "you to get your things safely?"
+                ),
+                "schema": {"type": "string"},
+            }
+        if "transfer_utilities" in ok_relief and "ok.transfer_detail" not in answers:
+            return {
+                "step": "ok.transfer_detail",
+                "prompt": (
+                    "Which utilities or phone numbers should be moved into your name? "
+                    "List whatever applies."
+                ),
+                "schema": {"type": "string"},
+            }
+        if "attorney_fees" in ok_relief and "ok.attorney_fees_amount" not in answers:
+            return {
+                "step": "ok.attorney_fees_amount",
+                "prompt": "If you know the attorney's-fees amount to ask for, what is it?",
+                "schema": {"type": "string"},
+            }
+        if "ok.additional_relief" not in answers:
+            return {
+                "step": "ok.additional_relief",
+                "prompt": (
+                    "Anything else you'd like to ask the court for? You can describe it, "
+                    "or skip."
+                ),
+                "schema": {"type": "string"},
+            }
+        return None
+
+    def _ssn_gate(
+        self, jurisdiction: str, answers: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        # FL collects the survivor's chosen orders as `fl.relief`, not the CA-style
+        # `selected_reliefs_intents`, so the support→SSN gate must read both.
+        requested_reliefs = answers.get("selected_reliefs_intents", [])
+        fl_relief = answers.get("fl.relief", [])
+        if (
+            jurisdiction in {"CA", "FL", "TX"}
+            and (
+                "child_support" in requested_reliefs
+                or "spousal_support" in requested_reliefs
+                or "child_support" in fl_relief
+                or "spousal_support" in fl_relief
+            )
+            and "petitioner.ssn" not in answers
+        ):
+            return {
+                "step": "petitioner.ssn",
+                "prompt": (
+                    "Because you're asking the judge for support, the court needs your Social "
+                    "Security number. It's encrypted on our end — only used when the petition "
+                    "gets generated, and never shared anywhere else."
+                ),
+                "schema": {"type": "string", "pattern": r"^\d{3}-\d{2}-\d{4}$"},
+            }
+        return None
+
+    _STATE_STEPS: ClassVar[
+        dict[str, Callable[[IntakeStateMachine, dict[str, Any]], dict[str, Any] | None]]
+    ] = {
+        "CA": _ca_step,
+        "WA": _wa_step,
+        "VA": _va_step,
+        "TX": _tx_step,
+        "PA": _pa_step,
+        "NC": _nc_step,
+        "NY": _ny_step,
+        "MA": _ma_step,
+        "MD": _md_step,
+        "HI": _hi_step,
+        "GA": _ga_step,
+        "WV": _wv_step,
+        "WI": _wi_step,
+        "WY": _wy_step,
+        "AL": _al_step,
+        "AK": _ak_step,
+        "AR": _ar_step,
+        "CO": _co_step,
+        "CT": _ct_step,
+        "DC": _dc_step,
+        "DE": _de_step,
+        "UT": _ut_step,
+        "VT": _vt_step,
+        "SD": _sd_step,
+        "TN": _tn_step,
+        "FL": _fl_step,
+        "RI": _ri_step,
+        "OR": _or_step,
+        "OK": _ok_step,
+    }
+
+
+def determine_next_step(jurisdiction: str, answers: dict[str, Any]) -> dict[str, Any]:
+    """Public entry point for the Vault intake state machine.
+
+    Delegates to `IntakeStateMachine`; the signature and return contract are
+    unchanged (called by `handle_intake_step` and the test-suite).
+    """
+    return IntakeStateMachine().next_step(jurisdiction, answers)
