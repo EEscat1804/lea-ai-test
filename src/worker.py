@@ -14,6 +14,7 @@ from lib.auth import authorize
 from lib.responses import json_response, problem_response
 from persona.system_prompts import compose_system_prompt
 from vault.intake import handle_intake_step
+from vault.petition import handle_petition_request
 
 
 async def on_fetch(request, env):  # type: ignore[no-untyped-def]
@@ -43,6 +44,10 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
     if path == "/v1/vault/intake" and method == "POST":
         body = await _read_json_body(request)
         return await handle_intake_step(body, env)
+
+    if path == "/v1/vault/petition" and method == "POST":
+        body = await _read_json_body(request)
+        return await handle_petition_request(body, env)
 
     if path == "/v1/persona/prompt" and method == "GET":
         persona = _query_param(url, "persona") or "default"
