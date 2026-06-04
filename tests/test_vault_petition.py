@@ -2262,6 +2262,1422 @@ def test_vt_field_table_items_are_unique():
     assert len(items) == len(set(items))
 
 
+# --- Ohio Petition for Domestic Violence Civil Protection Order ---
+
+
+def test_oh_is_supported_and_metadata():
+    assert "OH" in supported_jurisdictions()
+    out = assemble_petition("OH", {**_CA_ANSWERS, "oh.county": "Franklin"})
+    assert out["form"] == "10.01-D"
+    assert out["jurisdiction"] == "OH"
+
+
+def test_oh_maps_core_fields():
+    fields = assemble_petition("OH", {**_CA_ANSWERS, "oh.county": "Franklin"})["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Franklin"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    # Petitioner address is the safe mailing address (form is a public record).
+    assert fields["petitioner_address"]["value"].startswith("PO Box 5")
+
+
+def test_oh_who_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "oh.county": "Franklin",
+        "oh.who_needs_protection": ["me", "minor_children"],
+        "oh.relief": ["no_abuse", "exclusive_residence"],
+    }
+    fields = assemble_petition("OH", answers)["fields"]
+    assert fields["who_me"]["value"] == "checked"
+    assert fields["who_minor_children"]["value"] == "checked"
+    assert fields["who_other"]["status"] == "not_collected"
+    assert fields["r_no_abuse"]["value"] == "checked"
+    assert fields["r_exclusive_residence"]["value"] == "checked"
+    assert fields["r_no_contact"]["status"] == "not_collected"
+
+
+def test_oh_aggravating_and_relief_detail_map():
+    answers = {
+        **_CA_ANSWERS,
+        "oh.county": "Franklin",
+        "oh.aggravating_factors": ["weapons_access", "controlling_stalking"],
+        "oh.relief": ["vehicle"],
+        "oh.vehicle_detail": "2012 gray Civic",
+    }
+    fields = assemble_petition("OH", answers)["fields"]
+    assert fields["ag_weapons_access"]["value"] == "checked"
+    assert fields["ag_controlling_stalking"]["value"] == "checked"
+    assert fields["ag_mental_health"]["status"] == "not_collected"
+    assert fields["vehicle_detail"]["value"] == "2012 gray Civic"
+
+
+def test_oh_in_fear_and_full_hearing_default_on():
+    fields = assemble_petition("OH", {**_CA_ANSWERS, "oh.county": "Franklin"})["fields"]
+    assert fields["in_fear"]["value"] == "checked"
+    assert fields["full_hearing"]["value"] == "checked"
+
+
+def test_oh_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("OH", {**answers, "oh.county": "Franklin"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_oh_field_table_items_are_unique():
+    from vault.forms import oh
+
+    items = [f.item for f in oh.OH_DVCPO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- North Dakota Petition for Civil Protection Order ---
+
+
+def test_nd_is_supported_and_metadata():
+    assert "ND" in supported_jurisdictions()
+    out = assemble_petition("ND", {**_CA_ANSWERS, "nd.county": "Cass"})
+    assert out["form"] == "Petition CPO"
+    assert out["jurisdiction"] == "ND"
+
+
+def test_nd_maps_core_fields():
+    fields = assemble_petition("ND", {**_CA_ANSWERS, "nd.county": "Cass"})["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Cass"
+    assert fields["recent_incidents"]["value"].startswith("He grabbed my phone")
+    assert fields["victim_petitioner"]["value"] == "checked"
+
+
+def test_nd_confidential_address_defaults_on():
+    fields = assemble_petition("ND", {**_CA_ANSWERS, "nd.county": "Cass"})["fields"]
+    assert fields["confidential_address"]["value"] == "checked"
+
+
+def test_nd_order_types_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "nd.county": "Cass",
+        "nd.order_types": ["domestic_violence", "sexual_assault"],
+        "nd.relief": ["restrain_contact", "surrender_firearms"],
+    }
+    fields = assemble_petition("ND", answers)["fields"]
+    assert fields["ot_domestic_violence"]["value"] == "checked"
+    assert fields["ot_sexual_assault"]["value"] == "checked"
+    assert fields["ot_disorderly_conduct"]["status"] == "not_collected"
+    assert fields["r_restrain_contact"]["value"] == "checked"
+    assert fields["r_surrender_firearms"]["value"] == "checked"
+    assert fields["r_custody"]["status"] == "not_collected"
+
+
+def test_nd_exclude_places_and_detail_map():
+    answers = {
+        **_CA_ANSWERS,
+        "nd.county": "Cass",
+        "nd.relief": ["exclude_places"],
+        "nd.exclude_places": ["residence", "school"],
+        "nd.stay_away_feet": "500",
+    }
+    fields = assemble_petition("ND", answers)["fields"]
+    assert fields["ex_residence"]["value"] == "checked"
+    assert fields["ex_school"]["value"] == "checked"
+    assert fields["ex_daycare"]["status"] == "not_collected"
+    assert fields["stay_away_feet"]["value"] == "500"
+
+
+def test_nd_respondent_ssn_never_collected():
+    fields = assemble_petition("ND", {**_CA_ANSWERS, "nd.county": "Cass"})["fields"]
+    assert fields["respondent_ssn"]["status"] == "not_collected"
+    assert fields["respondent_ssn"]["value"] is None
+
+
+def test_nd_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("ND", {**answers, "nd.county": "Cass"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_nd_field_table_items_are_unique():
+    from vault.forms import nd
+
+    items = [f.item for f in nd.ND_CPO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- New Mexico Petition for Order of Protection from Domestic Abuse ---
+
+
+def test_nm_is_supported_and_metadata():
+    assert "NM" in supported_jurisdictions()
+    out = assemble_petition("NM", {**_CA_ANSWERS, "nm.county": "Bernalillo"})
+    assert out["form"] == "4-961"
+    assert out["jurisdiction"] == "NM"
+
+
+def test_nm_maps_core_fields():
+    fields = assemble_petition("NM", {**_CA_ANSWERS, "nm.county": "Bernalillo"})["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Bernalillo"
+    assert fields["abuse_description"]["value"].startswith("He grabbed my phone")
+
+
+def test_nm_confidential_address_defaults_on():
+    fields = assemble_petition("NM", {**_CA_ANSWERS, "nm.county": "Bernalillo"})["fields"]
+    assert fields["confidential_address"]["value"] == "checked"
+
+
+def test_nm_relief_checks_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "nm.county": "Bernalillo",
+        "nm.relief": ["no_contact_stay_away", "surrender_firearms"],
+    }
+    fields = assemble_petition("NM", answers)["fields"]
+    assert fields["r_no_contact_stay_away"]["value"] == "checked"
+    assert fields["r_surrender_firearms"]["value"] == "checked"
+    assert fields["r_custody"]["status"] == "not_collected"
+
+
+def test_nm_relief_detail_and_support_map():
+    answers = {
+        **_CA_ANSWERS,
+        "nm.county": "Bernalillo",
+        "nm.relief": ["leave_residence", "support"],
+        "nm.residence_address": "9 Mesa Rd, Albuquerque, NM",
+        "nm.support_types": ["children"],
+    }
+    fields = assemble_petition("NM", answers)["fields"]
+    assert fields["residence_address"]["value"] == "9 Mesa Rd, Albuquerque, NM"
+    assert fields["support_children"]["value"] == "checked"
+    assert fields["support_petitioner"]["status"] == "not_collected"
+
+
+def test_nm_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NM", {**answers, "nm.county": "Bernalillo"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_nm_field_table_items_are_unique():
+    from vault.forms import nm
+
+    items = [f.item for f in nm.NM_OP_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- New Hampshire Domestic Violence Petition (NHJB-2050-DF) ---
+
+
+def test_nh_is_supported_and_metadata():
+    assert "NH" in supported_jurisdictions()
+    out = assemble_petition("NH", {**_CA_ANSWERS, "nh.court_name": "Concord"})
+    assert out["form"] == "NHJB-2050-DF"
+    assert out["jurisdiction"] == "NH"
+
+
+def test_nh_maps_core_fields():
+    out = assemble_petition("NH", {**_CA_ANSWERS, "nh.court_name": "Concord"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["court_name"]["value"] == "Concord"
+    assert fields["statement_of_facts"]["value"].startswith("He grabbed my phone")
+    # The relationship basis is mapped but must be attorney-confirmed.
+    assert "relationship_basis" in out["review_items"]
+
+
+def test_nh_immediate_danger_defaults_on():
+    fields = assemble_petition("NH", {**_CA_ANSWERS, "nh.court_name": "Concord"})["fields"]
+    assert fields["immediate_danger"]["value"] == "checked"
+    assert "immediate_danger" in assemble_petition(
+        "NH", {**_CA_ANSWERS, "nh.court_name": "Concord"}
+    )["review_items"]
+
+
+def test_nh_relief_and_losses_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "nh.court_name": "Concord",
+        "nh.relief": ["no_abuse_contact", "exclusive_vehicle", "pay_losses"],
+        "nh.vehicle_detail": "2012 gray Civic",
+        "nh.financial_losses": ["medical_dental_optical", "lost_wages"],
+    }
+    fields = assemble_petition("NH", answers)["fields"]
+    assert fields["r_1_no_abuse_contact"]["value"] == "checked"
+    assert fields["r_11_exclusive_vehicle"]["value"] == "checked"
+    assert fields["r_6_custody"]["status"] == "not_collected"
+    assert fields["exclusive_vehicle_detail"]["value"] == "2012 gray Civic"
+    assert fields["loss_medical"]["value"] == "checked"
+    assert fields["loss_wages"]["value"] == "checked"
+    assert fields["loss_property"]["status"] == "not_collected"
+
+
+def test_nh_court_actions_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "nh.court_name": "Concord",
+        "nh.court_actions": ["divorce", "custody"],
+        "nh.court_list": "Concord Family Division",
+    }
+    fields = assemble_petition("NH", answers)["fields"]
+    assert fields["court_divorce"]["value"] == "checked"
+    assert fields["court_custody"]["value"] == "checked"
+    assert fields["court_protective_order"]["status"] == "not_collected"
+    assert fields["court_list"]["value"] == "Concord Family Division"
+
+
+def test_nh_relief_items_are_review_items():
+    out = assemble_petition("NH", {**_CA_ANSWERS, "nh.court_name": "Concord"})
+    assert "r_1_no_abuse_contact" in out["review_items"]
+    assert "relationship_basis" in out["review_items"]
+
+
+def test_nh_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NH", {**answers, "nh.court_name": "Concord"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_nh_missing_court_name_is_fact_needed():
+    out = assemble_petition("NH", _CA_ANSWERS)
+    assert out["fields"]["court_name"]["value"] == "[FACT NEEDED]"
+    assert "court_name" in out["gaps"]
+
+
+def test_nh_field_table_items_are_unique():
+    from vault.forms import nh
+
+    items = [f.item for f in nh.NH_DV_PETITION_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Montana Sworn Petition for Temporary Order of Protection (AGO Form OVS 3) ---
+
+
+def test_mt_is_supported_and_metadata():
+    assert "MT" in supported_jurisdictions()
+    out = assemble_petition("MT", {**_CA_ANSWERS, "mt.county": "Lewis and Clark"})
+    assert out["form"] == "OVS 3"
+    assert out["jurisdiction"] == "MT"
+
+
+def test_mt_maps_core_fields():
+    out = assemble_petition("MT", {**_CA_ANSWERS, "mt.county": "Lewis and Clark"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Lewis and Clark"
+    assert fields["recent_abuse_narrative"]["value"].startswith("He grabbed my phone")
+    # Petitioner is always among the protected persons.
+    assert fields["protected_myself"]["value"] == "checked"
+    assert "relationship_basis" in out["review_items"]
+
+
+def test_mt_immediate_danger_defaults_on_and_is_review():
+    out = assemble_petition("MT", {**_CA_ANSWERS, "mt.county": "Lewis and Clark"})
+    assert out["fields"]["immediate_danger"]["value"] == "checked"
+    assert "immediate_danger" in out["review_items"]
+
+
+def test_mt_relief_and_stay_away_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "mt.county": "Lewis and Clark",
+        "mt.relief": ["no_violence", "stay_away"],
+        "mt.stay_away_feet": "1000",
+        "mt.stay_away_places": ["me", "home"],
+    }
+    fields = assemble_petition("MT", answers)["fields"]
+    assert fields["r_1_no_violence"]["value"] == "checked"
+    assert fields["r_4_stay_away"]["value"] == "checked"
+    assert fields["r_9_counseling"]["status"] == "not_collected"
+    assert fields["stay_away_feet"]["value"] == "1000"
+    assert fields["sa_me"]["value"] == "checked"
+    assert fields["sa_home"]["value"] == "checked"
+    assert fields["sa_vehicle"]["status"] == "not_collected"
+
+
+def test_mt_living_situation_and_possession_detail_map():
+    answers = {
+        **_CA_ANSWERS,
+        "mt.county": "Lewis and Clark",
+        "mt.living_situation": ["left_residence"],
+        "mt.return_reason": ["get_belongings"],
+        "mt.relief": ["possession"],
+        "mt.possession_detail": "The pickup truck and my laptop",
+    }
+    fields = assemble_petition("MT", answers)["fields"]
+    assert fields["live_left_residence"]["value"] == "checked"
+    assert fields["return_belongings"]["value"] == "checked"
+    assert fields["return_live"]["status"] == "not_collected"
+    assert fields["possession_detail"]["value"] == "The pickup truck and my laptop"
+
+
+def test_mt_relief_items_are_review_items():
+    out = assemble_petition("MT", {**_CA_ANSWERS, "mt.county": "Lewis and Clark"})
+    assert "r_1_no_violence" in out["review_items"]
+
+
+def test_mt_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MT", {**answers, "mt.county": "Lewis and Clark"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_mt_missing_county_is_fact_needed():
+    out = assemble_petition("MT", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_mt_field_table_items_are_unique():
+    from vault.forms import mt
+
+    items = [f.item for f in mt.MT_TOP_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Nevada Application for Protection Order Against DV (© 2022) ---
+
+
+def test_nv_is_supported_and_metadata():
+    assert "NV" in supported_jurisdictions()
+    out = assemble_petition(
+        "NV", {**_CA_ANSWERS, "nv.court_type": "district", "nv.county": "Clark"}
+    )
+    # No printed form number — descriptive id, flagged NVG1.
+    assert out["form"] == "Application for Protection Order - DV"
+    assert out["jurisdiction"] == "NV"
+
+
+def test_nv_maps_core_fields():
+    out = assemble_petition(
+        "NV", {**_CA_ANSWERS, "nv.court_type": "district", "nv.county": "Clark"}
+    )
+    fields = out["fields"]
+    assert fields["applicant"]["value"] == "Jane Doe"
+    assert fields["adverse_party"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Clark"
+    assert fields["recent_narrative"]["value"].startswith("He grabbed my phone")
+    # Work stay-away maps from the always-collected employer block.
+    assert "relationship_basis" in out["review_items"]
+
+
+def test_nv_address_confidential_defaults_on():
+    fields = assemble_petition(
+        "NV", {**_CA_ANSWERS, "nv.court_type": "district", "nv.county": "Clark"}
+    )["fields"]
+    assert fields["address_confidential"]["value"] == "checked"
+    assert fields["temporary_order"]["value"] == "checked"
+    assert fields["no_personal_info"]["value"] == "checked"
+
+
+def test_nv_temp_protections_and_extended_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "nv.court_type": "district",
+        "nv.county": "Clark",
+        "nv.temp_protections": ["prohibited_activities", "current_residence"],
+        "nv.order_length": "extended_2yr",
+        "nv.extended_relief": ["child_support", "costs_fees"],
+    }
+    fields = assemble_petition("NV", answers)["fields"]
+    assert fields["tp_prohibited_activities"]["value"] == "checked"
+    assert fields["tp_current_residence"]["value"] == "checked"
+    assert fields["tp_work"]["status"] == "not_collected"
+    assert fields["ext_child_support"]["value"] == "checked"
+    assert fields["ext_costs_fees"]["value"] == "checked"
+    assert fields["ext_rent_mortgage"]["status"] == "not_collected"
+
+
+def test_nv_who_and_reason_map():
+    answers = {
+        **_CA_ANSWERS,
+        "nv.court_type": "district",
+        "nv.county": "Clark",
+        "nv.who_needs_protection": ["me", "minor_children"],
+        "nv.protection_reason": ["dv_against_me"],
+    }
+    fields = assemble_petition("NV", answers)["fields"]
+    assert fields["who_me"]["value"] == "checked"
+    assert fields["who_minor_children"]["value"] == "checked"
+    assert fields["reason_dv_me"]["value"] == "checked"
+    assert fields["reason_dv_child"]["status"] == "not_collected"
+
+
+def test_nv_relief_items_are_review_items():
+    out = assemble_petition(
+        "NV", {**_CA_ANSWERS, "nv.court_type": "district", "nv.county": "Clark"}
+    )
+    assert "tp_prohibited_activities" in out["review_items"]
+    assert "order_length" in out["review_items"]
+
+
+def test_nv_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NV", {**answers, "nv.court_type": "district", "nv.county": "Clark"})
+    assert out["fields"]["applicant"]["value"] == "[FACT NEEDED]"
+    assert "applicant" in out["gaps"]
+
+
+def test_nv_missing_court_type_is_fact_needed():
+    out = assemble_petition("NV", {**_CA_ANSWERS, "nv.county": "Clark"})
+    assert out["fields"]["court_type"]["value"] == "[FACT NEEDED]"
+    assert "court_type" in out["gaps"]
+
+
+def test_nv_field_table_items_are_unique():
+    from vault.forms import nv
+
+    items = [f.item for f in nv.NV_APPLICATION_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Nebraska Petition and Affidavit for Domestic Abuse Protection Order (DC 19:8) ---
+
+
+def test_ne_is_supported_and_metadata():
+    assert "NE" in supported_jurisdictions()
+    out = assemble_petition("NE", {**_CA_ANSWERS, "ne.county": "Lancaster"})
+    assert out["form"] == "DC 19:8"
+    assert out["jurisdiction"] == "NE"
+
+
+def test_ne_maps_core_fields():
+    fields = assemble_petition("NE", {**_CA_ANSWERS, "ne.county": "Lancaster"})["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["court_county"]["value"] == "Lancaster"
+    assert fields["incident_narrative"]["value"].startswith("He grabbed my phone")
+    # Temporary custody is requested to the petitioner.
+    assert fields["custody_to"]["value"] == "Jane Doe"
+
+
+def test_ne_defaults_address_confidential_and_additional_request():
+    fields = assemble_petition("NE", {**_CA_ANSWERS, "ne.county": "Lancaster"})["fields"]
+    assert fields["address_confidential"]["value"] == "checked"
+    assert fields["filing_myself"]["value"] == "checked"
+    assert fields["additional_request"]["value"] == "checked"
+
+
+def test_ne_petitioner_adult_derives_from_dob():
+    # _CA_ANSWERS petitioner.dob is 1990 -> 19+.
+    fields = assemble_petition("NE", {**_CA_ANSWERS, "ne.county": "Lancaster"})["fields"]
+    assert fields["petitioner_adult"]["value"] == "checked"
+
+
+def test_ne_relief_checks_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "ne.county": "Lancaster",
+        "ne.relief": ["no_abuse", "no_firearm", "custody"],
+        "ne.custody_days": "30",
+    }
+    fields = assemble_petition("NE", answers)["fields"]
+    assert fields["r_no_abuse"]["value"] == "checked"
+    assert fields["r_no_firearm"]["value"] == "checked"
+    assert fields["r_custody"]["value"] == "checked"
+    assert fields["r_pet_possession"]["status"] == "not_collected"
+    assert fields["custody_days"]["value"] == "30"
+
+
+def test_ne_praecipe_vehicle_and_physical_map():
+    answers = {
+        **_CA_ANSWERS,
+        "ne.county": "Lancaster",
+        "respondent.height": "5'11",
+        "respondent.vehicle_make_model": "Toyota Camry",
+        "respondent.vehicle_plate": "NE-123",
+    }
+    fields = assemble_petition("NE", answers)["fields"]
+    assert fields["respondent_height"]["value"] == "5'11"
+    assert fields["praecipe_vehicle_make_model"]["value"] == "Toyota Camry"
+    assert fields["praecipe_vehicle_plate"]["value"] == "NE-123"
+
+
+def test_ne_relief_items_are_review_items():
+    out = assemble_petition("NE", {**_CA_ANSWERS, "ne.county": "Lancaster"})
+    assert "r_no_abuse" in out["review_items"]
+    assert "relationship_basis" in out["review_items"]
+
+
+def test_ne_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("NE", {**answers, "ne.county": "Lancaster"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ne_missing_county_is_fact_needed():
+    out = assemble_petition("NE", _CA_ANSWERS)
+    assert out["fields"]["court_county"]["value"] == "[FACT NEEDED]"
+    assert "court_county" in out["gaps"]
+
+
+def test_ne_field_table_items_are_unique():
+    from vault.forms import ne
+
+    items = [f.item for f in ne.NE_DAPO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Maine Complaint for Protection from Abuse (Form PA-001) ---
+
+
+def test_me_is_supported_and_metadata():
+    assert "ME" in supported_jurisdictions()
+    out = assemble_petition("ME", {**_CA_ANSWERS, "me.court_location": "Portland"})
+    assert out["form"] == "PA-001"
+    assert out["jurisdiction"] == "ME"
+
+
+def test_me_maps_core_fields():
+    out = assemble_petition("ME", {**_CA_ANSWERS, "me.court_location": "Portland"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["court_location"]["value"] == "Portland"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    # Maine offers a confidential-address mechanism (PA-015) — derived on, flagged.
+    assert fields["address_confidential"]["value"] == "checked"
+    assert "address_confidential" in out["review_items"]
+
+
+def test_me_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "me.court_location": "Portland",
+        "me.relationship_basis": ["married", "stalking"],
+        "me.relief": ["stop_abuse", "stay_distance"],
+        "me.stay_distance_detail": "500 feet from my home",
+    }
+    fields = assemble_petition("ME", answers)["fields"]
+    assert fields["4_spouse"]["value"] == "checked"
+    assert fields["4_stalking"]["value"] == "checked"
+    assert fields["4_dating_partner"]["status"] == "not_collected"
+    assert fields["order_a_stop_abuse"]["value"] == "checked"
+    assert fields["order_e_stay_distance"]["value"] == "checked"
+    assert fields["order_l_counseling"]["status"] == "not_collected"
+    assert fields["order_e_stay_distance_detail"]["value"] == "500 feet from my home"
+
+
+def test_me_temporary_order_and_weapon_access_map():
+    answers = {
+        **_CA_ANSWERS,
+        "me.court_location": "Portland",
+        "me.temporary_order": ["self_danger"],
+        "me.weapon_access": ["firearm"],
+    }
+    fields = assemble_petition("ME", answers)["fields"]
+    assert fields["10_self_danger"]["value"] == "checked"
+    assert fields["10_not_requesting"]["status"] == "not_collected"
+    assert fields["11_firearm"]["value"] == "checked"
+
+
+def test_me_relief_and_temporary_items_are_review_items():
+    out = assemble_petition("ME", {**_CA_ANSWERS, "me.court_location": "Portland"})
+    assert "order_a_stop_abuse" in out["review_items"]
+    assert "10_self_danger" in out["review_items"]
+    assert "4_spouse" in out["review_items"]
+
+
+def test_me_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("ME", {**answers, "me.court_location": "Portland"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_me_missing_court_location_is_fact_needed():
+    out = assemble_petition("ME", _CA_ANSWERS)
+    assert out["fields"]["court_location"]["value"] == "[FACT NEEDED]"
+    assert "court_location" in out["gaps"]
+
+
+def test_me_field_table_items_are_unique():
+    from vault.forms import me
+
+    items = [f.item for f in me.ME_PFA_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Michigan Petition for Personal Protection Order (Form CC 375) ---
+
+
+def test_mi_is_supported_and_metadata():
+    assert "MI" in supported_jurisdictions()
+    out = assemble_petition("MI", {**_CA_ANSWERS, "mi.county": "Wayne"})
+    assert out["form"] == "CC 375"
+    assert out["jurisdiction"] == "MI"
+
+
+def test_mi_maps_core_fields():
+    out = assemble_petition("MI", {**_CA_ANSWERS, "mi.county": "Wayne"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Wayne"
+    assert fields["need_narrative"]["value"].startswith("He grabbed my phone")
+    # CC 375 has no confidential-address affidavit — the address is flagged for review.
+    assert "petitioner_address" in out["review_items"]
+
+
+def test_mi_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "mi.county": "Wayne",
+        "mi.relationship": ["married", "cohabitants"],
+        "mi.relief": ["enter_my_property", "assault"],
+        "mi.assault_names": "Jane Doe and her mother",
+    }
+    fields = assemble_petition("MI", answers)["fields"]
+    assert fields["1_married"]["value"] == "checked"
+    assert fields["1_cohabitants"]["value"] == "checked"
+    assert fields["1_dating"]["status"] == "not_collected"
+    assert fields["5a_no_enter_my_property"]["value"] == "checked"
+    assert fields["5c_no_assault"]["value"] == "checked"
+    assert fields["5k_no_firearm"]["status"] == "not_collected"
+    assert fields["5c_assault_names"]["value"] == "Jane Doe and her mother"
+
+
+def test_mi_stalking_and_animal_acts_map():
+    answers = {
+        **_CA_ANSWERS,
+        "mi.county": "Wayne",
+        "mi.relief": ["stalking", "animal_abuse"],
+        "mi.stalking_acts": ["following", "contacting_phone"],
+        "mi.animal_acts": ["injure"],
+    }
+    fields = assemble_petition("MI", answers)["fields"]
+    assert fields["5e_following"]["value"] == "checked"
+    assert fields["5e_contacting_phone"]["value"] == "checked"
+    assert fields["5e_placing_object"]["status"] == "not_collected"
+    assert fields["5j_injure_animal"]["value"] == "checked"
+    assert fields["5j_retain_animal"]["status"] == "not_collected"
+
+
+def test_mi_ex_parte_maps_and_is_review():
+    answers = {**_CA_ANSWERS, "mi.county": "Wayne", "mi.ex_parte": True}
+    out = assemble_petition("MI", answers)
+    assert out["fields"]["ex_parte"]["value"] is True
+    assert "ex_parte" in out["review_items"]
+
+
+def test_mi_relief_items_are_review_items():
+    out = assemble_petition("MI", {**_CA_ANSWERS, "mi.county": "Wayne"})
+    assert "5a_no_enter_my_property" in out["review_items"]
+    assert "1_married" in out["review_items"]
+
+
+def test_mi_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MI", {**answers, "mi.county": "Wayne"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_mi_missing_county_is_fact_needed():
+    out = assemble_petition("MI", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_mi_field_table_items_are_unique():
+    from vault.forms import mi
+
+    items = [f.item for f in mi.MI_PPO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Iowa Petition for Relief from Domestic Abuse (Rule 17.10 Form 11) ---
+
+
+def test_ia_is_supported_and_metadata():
+    assert "IA" in supported_jurisdictions()
+    out = assemble_petition("IA", {**_CA_ANSWERS, "ia.county": "Polk"})
+    assert out["form"] == "Rule 17.10 Form 11"
+    assert out["jurisdiction"] == "IA"
+
+
+def test_ia_maps_core_fields():
+    out = assemble_petition("IA", {**_CA_ANSWERS, "ia.county": "Polk"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Polk"
+    assert fields["recent_abuse_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_ia_relationship_abuse_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "ia.county": "Polk",
+        "ia.relationship_basis": ["intimate_relationship"],
+        "ia.abuse_types": ["physical", "threats"],
+        "ia.relief": ["stop_abuse", "financial_support"],
+        "ia.support_detail": "$800/mo for rent and childcare",
+    }
+    fields = assemble_petition("IA", answers)["fields"]
+    assert fields["7_intimate_relationship"]["value"] == "checked"
+    assert fields["8_physical"]["value"] == "checked"
+    assert fields["8_sexual"]["status"] == "not_collected"
+    assert fields["23c_1_stop_abuse"]["value"] == "checked"
+    assert fields["23c_10_financial_support"]["value"] == "checked"
+    assert fields["23c_10_support_detail"]["value"] == "$800/mo for rent and childcare"
+
+
+def test_ia_order_request_and_confidential_map():
+    answers = {
+        **_CA_ANSWERS,
+        "ia.county": "Polk",
+        "ia.order_request": ["temporary"],
+        "ia.confidential_requests": ["seal_file", "remove_address"],
+    }
+    out = assemble_petition("IA", answers)
+    fields = out["fields"]
+    assert fields["23_temporary"]["value"] == "checked"
+    assert fields["23_final"]["status"] == "not_collected"
+    assert fields["24_seal_file"]["value"] == "checked"
+    assert "24_seal_file" in out["review_items"]
+
+
+def test_ia_relief_items_are_review_items():
+    out = assemble_petition("IA", {**_CA_ANSWERS, "ia.county": "Polk"})
+    assert "23c_1_stop_abuse" in out["review_items"]
+    assert "7_intimate_relationship" in out["review_items"]
+
+
+def test_ia_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("IA", {**answers, "ia.county": "Polk"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ia_missing_county_is_fact_needed():
+    out = assemble_petition("IA", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_ia_field_table_items_are_unique():
+    from vault.forms import ia
+
+    items = [f.item for f in ia.IA_RELIEF_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Kentucky Petition/Motion for Order of Protection (AOC-275.1) ---
+
+
+def test_ky_is_supported_and_metadata():
+    assert "KY" in supported_jurisdictions()
+    out = assemble_petition("KY", {**_CA_ANSWERS, "ky.county": "Jefferson"})
+    assert out["form"] == "AOC-275.1"
+    assert out["jurisdiction"] == "KY"
+
+
+def test_ky_maps_core_and_physical_fields():
+    answers = {
+        **_CA_ANSWERS,
+        "ky.county": "Jefferson",
+        "respondent.height": "5'10",
+        "respondent.hair_color": "Brown",
+    }
+    fields = assemble_petition("KY", answers)["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Jefferson"
+    assert fields["respondent_height"]["value"] == "5'10"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_ky_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "ky.county": "Jefferson",
+        "ky.relationship_basis": ["married"],
+        "ky.caution": ["weapon_involved"],
+        "ky.relief": ["no_further_acts", "vacate_residence"],
+        "ky.vacate_address": "100 Main St",
+    }
+    fields = assemble_petition("KY", answers)["fields"]
+    assert fields["2_married"]["value"] == "checked"
+    assert fields["2_dating_relationship"]["status"] == "not_collected"
+    assert fields["caution_weapon_involved"]["value"] == "checked"
+    assert fields["relief_no_further_acts"]["value"] == "checked"
+    assert fields["relief_vacate_residence"]["value"] == "checked"
+    assert fields["relief_vacate_address"]["value"] == "100 Main St"
+
+
+def test_ky_ex_parte_maps_and_is_review():
+    answers = {**_CA_ANSWERS, "ky.county": "Jefferson", "ky.ex_parte": True}
+    out = assemble_petition("KY", answers)
+    assert out["fields"]["ex_parte"]["value"] is True
+    assert "ex_parte" in out["review_items"]
+
+
+def test_ky_relief_items_are_review_items():
+    out = assemble_petition("KY", {**_CA_ANSWERS, "ky.county": "Jefferson"})
+    assert "relief_no_further_acts" in out["review_items"]
+    assert "2_married" in out["review_items"]
+
+
+def test_ky_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("KY", {**answers, "ky.county": "Jefferson"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ky_missing_county_is_fact_needed():
+    out = assemble_petition("KY", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_ky_field_table_items_are_unique():
+    from vault.forms import ky
+
+    items = [f.item for f in ky.KY_OP_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Louisiana Petition for Protection from Abuse (LPOR B) ---
+
+
+def test_la_is_supported_and_metadata():
+    assert "LA" in supported_jurisdictions()
+    out = assemble_petition("LA", {**_CA_ANSWERS, "la.parish": "Orleans"})
+    assert out["form"] == "LPOR B"
+    assert out["jurisdiction"] == "LA"
+
+
+def test_la_maps_core_fields_and_confidential_address():
+    out = assemble_petition("LA", {**_CA_ANSWERS, "la.parish": "Orleans"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["parish"]["value"] == "Orleans"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    # LA offers a confidential-address mechanism (§2a) — derived on, flagged.
+    assert fields["address_confidential"]["value"] == "checked"
+    assert "address_confidential" in out["review_items"]
+
+
+def test_la_venue_relationship_abuse_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "la.parish": "Orleans",
+        "la.venue": ["abuse_occurred"],
+        "la.relationship_basis": ["spouse", "intimate_cohabitant"],
+        "la.abuse_types": ["choked", "threatened_weapon"],
+        "la.relief": ["no_abuse", "stay_away_residence"],
+        "la.residence_address": "55 Bourbon St",
+    }
+    fields = assemble_petition("LA", answers)["fields"]
+    assert fields["5_abuse_occurred"]["value"] == "checked"
+    assert fields["6_spouse"]["value"] == "checked"
+    assert fields["6_intimate_cohabitant"]["value"] == "checked"
+    assert fields["8a_choked"]["value"] == "checked"
+    assert fields["8a_slapped"]["status"] == "not_collected"
+    assert fields["9a_no_abuse"]["value"] == "checked"
+    assert fields["9c_stay_away_residence"]["value"] == "checked"
+    assert fields["9c_residence_address"]["value"] == "55 Bourbon St"
+
+
+def test_la_other_requests_map():
+    answers = {
+        **_CA_ANSWERS,
+        "la.parish": "Orleans",
+        "la.other_requests": ["child_support", "counseling"],
+    }
+    fields = assemble_petition("LA", answers)["fields"]
+    assert fields["10_child_support"]["value"] == "checked"
+    assert fields["10_counseling"]["value"] == "checked"
+    assert fields["10_attorney_fees"]["status"] == "not_collected"
+
+
+def test_la_relief_items_are_review_items():
+    out = assemble_petition("LA", {**_CA_ANSWERS, "la.parish": "Orleans"})
+    assert "9a_no_abuse" in out["review_items"]
+    assert "6_spouse" in out["review_items"]
+    assert "5_abuse_occurred" in out["review_items"]
+
+
+def test_la_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("LA", {**answers, "la.parish": "Orleans"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_la_missing_parish_is_fact_needed():
+    out = assemble_petition("LA", _CA_ANSWERS)
+    assert out["fields"]["parish"]["value"] == "[FACT NEEDED]"
+    assert "parish" in out["gaps"]
+
+
+def test_la_field_table_items_are_unique():
+    from vault.forms import la
+
+    items = [f.item for f in la.LA_PFA_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Idaho Sworn Petition for Protection Order (CAO DV 1-1) ---
+
+
+def test_id_is_supported_and_metadata():
+    assert "ID" in supported_jurisdictions()
+    out = assemble_petition("ID", {**_CA_ANSWERS, "id.county": "Ada"})
+    assert out["form"] == "CAO DV 1-1"
+    assert out["jurisdiction"] == "ID"
+
+
+def test_id_maps_core_and_confidential_and_personal_conduct():
+    out = assemble_petition("ID", {**_CA_ANSWERS, "id.county": "Ada"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Ada"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    # Confidential address + personal-conduct order are derived on and flagged.
+    assert fields["address_confidential"]["value"] == "checked"
+    assert fields["7a_personal_conduct"]["value"] == "checked"
+    assert "7a_personal_conduct" in out["review_items"]
+    assert "address_confidential" in out["review_items"]
+
+
+def test_id_petition_type_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "id.county": "Ada",
+        "id.petition_type": ["domestic_violence", "stalking"],
+        "id.relationship_basis": ["spouse"],
+        "id.relief": ["stay_away", "move_out"],
+        "id.stay_away_places": ["my_residence", "my_workplace_school"],
+        "id.move_out_address": "10 Boise Ave",
+    }
+    fields = assemble_petition("ID", answers)["fields"]
+    assert fields["6_domestic_violence"]["value"] == "checked"
+    assert fields["6_stalking"]["value"] == "checked"
+    assert fields["6_telephone_threats"]["status"] == "not_collected"
+    assert fields["2_spouse"]["value"] == "checked"
+    assert fields["7b_stay_away"]["value"] == "checked"
+    assert fields["7b_my_residence"]["value"] == "checked"
+    assert fields["7c_move_out_address"]["value"] == "10 Boise Ave"
+
+
+def test_id_relief_items_are_review_items():
+    out = assemble_petition("ID", {**_CA_ANSWERS, "id.county": "Ada"})
+    assert "7b_stay_away" in out["review_items"]
+    assert "2_spouse" in out["review_items"]
+    assert "6_domestic_violence" in out["review_items"]
+
+
+def test_id_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("ID", {**answers, "id.county": "Ada"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_id_missing_county_is_fact_needed():
+    out = assemble_petition("ID", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_id_field_table_items_are_unique():
+    from vault.forms import idaho
+
+    items = [f.item for f in idaho.ID_PO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Minnesota Petition for Order for Protection (OFP102) ---
+
+
+def test_mn_is_supported_and_metadata():
+    assert "MN" in supported_jurisdictions()
+    out = assemble_petition("MN", {**_CA_ANSWERS, "mn.county": "Hennepin"})
+    assert out["form"] == "OFP102"
+    assert out["jurisdiction"] == "MN"
+
+
+def test_mn_maps_core_and_confidential_address():
+    out = assemble_petition("MN", {**_CA_ANSWERS, "mn.county": "Hennepin"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Hennepin"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    assert fields["address_confidential"]["value"] == "checked"
+    assert "address_confidential" in out["review_items"]
+
+
+def test_mn_relationship_and_two_relief_tiers_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "mn.county": "Hennepin",
+        "mn.relationship_basis": ["married", "child_together"],
+        "mn.relief": ["no_harm", "pet_possession"],
+        "mn.pet_detail": "Our dog Rex",
+        "mn.hearing_relief": ["financial_support", "firearms"],
+    }
+    fields = assemble_petition("MN", answers)["fields"]
+    assert fields["7_married"]["value"] == "checked"
+    assert fields["7_child_together"]["value"] == "checked"
+    assert fields["15a_no_harm"]["value"] == "checked"
+    assert fields["15g_pet_possession"]["value"] == "checked"
+    assert fields["15g_pet_detail"]["value"] == "Our dog Rex"
+    assert fields["17_financial_support"]["value"] == "checked"
+    assert fields["21_firearms"]["value"] == "checked"
+    assert fields["18_property"]["status"] == "not_collected"
+
+
+def test_mn_immediate_danger_maps_and_is_review():
+    answers = {**_CA_ANSWERS, "mn.county": "Hennepin", "mn.immediate_danger": True}
+    out = assemble_petition("MN", answers)
+    assert out["fields"]["immediate_danger"]["value"] is True
+    assert "immediate_danger" in out["review_items"]
+
+
+def test_mn_relief_items_are_review_items():
+    out = assemble_petition("MN", {**_CA_ANSWERS, "mn.county": "Hennepin"})
+    assert "15a_no_harm" in out["review_items"]
+    assert "16_custody_parenting" in out["review_items"]
+    assert "7_married" in out["review_items"]
+
+
+def test_mn_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MN", {**answers, "mn.county": "Hennepin"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_mn_missing_county_is_fact_needed():
+    out = assemble_petition("MN", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_mn_field_table_items_are_unique():
+    from vault.forms import mn
+
+    items = [f.item for f in mn.MN_OFP_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Mississippi Petition for Domestic Abuse Protection Order (93-21-1) ---
+
+
+def test_ms_is_supported_and_metadata():
+    assert "MS" in supported_jurisdictions()
+    out = assemble_petition("MS", {**_CA_ANSWERS, "ms.county": "Hinds"})
+    assert out["form"] == "Petition for Domestic Abuse Protection Order"
+    assert out["jurisdiction"] == "MS"
+
+
+def test_ms_maps_core_physical_and_confidential():
+    answers = {
+        **_CA_ANSWERS,
+        "ms.county": "Hinds",
+        "respondent.height": "5'9",
+        "respondent.eye_color": "Brown",
+    }
+    out = assemble_petition("MS", answers)
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Hinds"
+    assert fields["respondent_height"]["value"] == "5'9"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+    assert fields["address_confidential"]["value"] == "checked"
+    assert "address_confidential" in out["review_items"]
+
+
+def test_ms_relationship_abuse_caution_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "ms.county": "Hinds",
+        "ms.relationship_basis": ["current_former_spouse"],
+        "ms.abuse_acts": ["stalking_cyberstalking", "sexual_battery_rape"],
+        "ms.caution": ["armed_dangerous"],
+        "ms.relief": ["prohibit_abuse", "sole_use_residence"],
+        "ms.residence_address": "200 Capitol St",
+        "ms.chancery_relief": ["custody_support"],
+    }
+    fields = assemble_petition("MS", answers)["fields"]
+    assert fields["1_current_former_spouse"]["value"] == "checked"
+    assert fields["5_stalking_cyberstalking"]["value"] == "checked"
+    assert fields["5_attempted_bodily_injury"]["status"] == "not_collected"
+    assert fields["4_armed_dangerous"]["value"] == "checked"
+    assert fields["9_prohibit_abuse"]["value"] == "checked"
+    assert fields["9_residence_address"]["value"] == "200 Capitol St"
+    assert fields["9c_custody_support"]["value"] == "checked"
+
+
+def test_ms_emergency_relief_and_review_items():
+    answers = {**_CA_ANSWERS, "ms.county": "Hinds", "ms.emergency_relief": True}
+    out = assemble_petition("MS", answers)
+    assert out["fields"]["emergency_relief"]["value"] is True
+    assert "emergency_relief" in out["review_items"]
+    assert "9_prohibit_abuse" in out["review_items"]
+    assert "1_current_former_spouse" in out["review_items"]
+
+
+def test_ms_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MS", {**answers, "ms.county": "Hinds"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_ms_missing_county_is_fact_needed():
+    out = assemble_petition("MS", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_ms_field_table_items_are_unique():
+    from vault.forms import ms
+
+    items = [f.item for f in ms.MS_PO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Indiana Petition for an Order for Protection (OJA-PO-0100) ---
+
+
+def test_in_is_supported_and_metadata():
+    assert "IN" in supported_jurisdictions()
+    out = assemble_petition("IN", {**_CA_ANSWERS, "in.county": "Marion"})
+    assert out["form"] == "OJA-PO-0100"
+    assert out["jurisdiction"] == "IN"
+
+
+def test_in_maps_core_and_confidential_and_ex_parte():
+    out = assemble_petition("IN", {**_CA_ANSWERS, "in.county": "Marion"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Marion"
+    assert fields["incident_narrative"]["value"].startswith("He grabbed my phone")
+    assert fields["confidential_address"]["value"] == "checked"
+    assert fields["ex_parte"]["value"] == "checked"
+    assert "ex_parte" in out["review_items"]
+
+
+def test_in_victim_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "in.county": "Marion",
+        "in.victim_basis": ["dv_family_violence", "stalking"],
+        "in.relationship_basis": ["spouse"],
+        "in.relief": ["prohibit_dv", "evict"],
+        "in.evict_address": "5 Indy Ln",
+        "in.hearing_relief": ["child_support"],
+    }
+    fields = assemble_petition("IN", answers)["fields"]
+    assert fields["1a_dv"]["value"] == "checked"
+    assert fields["1c_stalking"]["value"] == "checked"
+    assert fields["2_spouse"]["value"] == "checked"
+    assert fields["9_prohibit_dv"]["value"] == "checked"
+    assert fields["9_evict"]["value"] == "checked"
+    assert fields["9_evict_address"]["value"] == "5 Indy Ln"
+    assert fields["9h_child_support"]["value"] == "checked"
+
+
+def test_in_relief_items_are_review_items():
+    out = assemble_petition("IN", {**_CA_ANSWERS, "in.county": "Marion"})
+    assert "9_prohibit_dv" in out["review_items"]
+    assert "1a_dv" in out["review_items"]
+
+
+def test_in_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("IN", {**answers, "in.county": "Marion"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_in_missing_county_is_fact_needed():
+    out = assemble_petition("IN", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_in_field_table_items_are_unique():
+    from vault.forms import indiana
+
+    items = [f.item for f in indiana.IN_PO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- Missouri Petition for a Court Order of Protection - Adult (AA40) ---
+
+
+def test_mo_is_supported_and_metadata():
+    assert "MO" in supported_jurisdictions()
+    out = assemble_petition("MO", {**_CA_ANSWERS, "mo.county": "Jackson"})
+    assert out["form"] == "AA40"
+    assert out["jurisdiction"] == "MO"
+
+
+def test_mo_maps_core_physical_and_vehicle():
+    answers = {
+        **_CA_ANSWERS,
+        "mo.county": "Jackson",
+        "respondent.height": "5'11",
+        "respondent.vehicle_make_model": "Ford F-150",
+        "respondent.vehicle_plate": "MO-123",
+    }
+    fields = assemble_petition("MO", answers)["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Jackson"
+    assert fields["respondent_height"]["value"] == "5'11"
+    assert fields["respondent_vehicle"]["value"] == "Ford F-150"
+    assert fields["respondent_vehicle_plate"]["value"] == "MO-123"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_mo_venue_relationship_acts_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "mo.county": "Jackson",
+        "mo.venue": ["i_live"],
+        "mo.relationship_basis": ["spouse"],
+        "mo.abuse_acts": ["caused_harm", "stalked"],
+        "mo.ex_parte_basis": ["immediate_danger"],
+        "mo.relief": ["no_dv", "stay_distance"],
+        "mo.stay_distance_feet": "500",
+        "mo.additional_relief": ["custody", "child_support"],
+    }
+    fields = assemble_petition("MO", answers)["fields"]
+    assert fields["venue_i_live"]["value"] == "checked"
+    assert fields["a_spouse"]["value"] == "checked"
+    assert fields["b_caused_harm"]["value"] == "checked"
+    assert fields["b_stalked"]["value"] == "checked"
+    assert fields["b_immediate_danger"]["value"] == "checked"
+    assert fields["c1_no_dv"]["value"] == "checked"
+    assert fields["c1_stay_distance_feet"]["value"] == "500"
+    assert fields["c3_custody"]["value"] == "checked"
+    assert fields["c4_child_support"]["value"] == "checked"
+    assert fields["c4_attorney_fees"]["status"] == "not_collected"
+
+
+def test_mo_serious_danger_maps_and_is_review():
+    answers = {**_CA_ANSWERS, "mo.county": "Jackson", "mo.serious_danger": True}
+    out = assemble_petition("MO", answers)
+    assert out["fields"]["c2_serious_danger"]["value"] is True
+    assert "c2_serious_danger" in out["review_items"]
+
+
+def test_mo_relief_items_are_review_items():
+    out = assemble_petition("MO", {**_CA_ANSWERS, "mo.county": "Jackson"})
+    assert "c1_no_dv" in out["review_items"]
+    assert "a_spouse" in out["review_items"]
+
+
+def test_mo_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("MO", {**answers, "mo.county": "Jackson"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_mo_missing_county_is_fact_needed():
+    out = assemble_petition("MO", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_mo_field_table_items_are_unique():
+    from vault.forms import mo
+
+    items = [f.item for f in mo.MO_PO_FIELDS]
+    assert len(items) == len(set(items))
+
+
+# --- South Carolina Petition for Family Court Order of Protection (SCCA 425) ---
+
+
+def test_sc_is_supported_and_metadata():
+    assert "SC" in supported_jurisdictions()
+    out = assemble_petition("SC", {**_CA_ANSWERS, "sc.county": "Richland"})
+    assert out["form"] == "SCCA 425"
+    assert out["jurisdiction"] == "SC"
+
+
+def test_sc_maps_core_fields():
+    out = assemble_petition("SC", {**_CA_ANSWERS, "sc.county": "Richland"})
+    fields = out["fields"]
+    assert fields["petitioner"]["value"] == "Jane Doe"
+    assert fields["respondent"]["value"] == "John Roe"
+    assert fields["county"]["value"] == "Richland"
+    assert fields["abuse_narrative"]["value"].startswith("He grabbed my phone")
+
+
+def test_sc_venue_relationship_and_relief_check_their_boxes():
+    answers = {
+        **_CA_ANSWERS,
+        "sc.county": "Richland",
+        "sc.venue": ["abuse_occurred"],
+        "sc.relationship_basis": ["married", "child_in_common"],
+        "sc.relief": ["no_abuse", "stay_away", "custody"],
+        "sc.stay_away_location": "My workplace",
+        "sc.custody_detail": "Our two kids, no visitation",
+    }
+    fields = assemble_petition("SC", answers)["fields"]
+    assert fields["1a_abuse_occurred"]["value"] == "checked"
+    assert fields["7a_married"]["value"] == "checked"
+    assert fields["7c_child_in_common"]["value"] == "checked"
+    assert fields["9a_no_abuse"]["value"] == "checked"
+    assert fields["9d_stay_away"]["value"] == "checked"
+    assert fields["9d_stay_away_location"]["value"] == "My workplace"
+    assert fields["9e_custody_detail"]["value"] == "Our two kids, no visitation"
+    assert fields["9i_insurance"]["status"] == "not_collected"
+
+
+def test_sc_relief_items_are_review_items():
+    out = assemble_petition("SC", {**_CA_ANSWERS, "sc.county": "Richland"})
+    assert "9a_no_abuse" in out["review_items"]
+    assert "7a_married" in out["review_items"]
+    assert "1a_abuse_occurred" in out["review_items"]
+
+
+def test_sc_missing_required_is_fact_needed():
+    answers = {k: v for k, v in _CA_ANSWERS.items() if k != "petitioner.legal_name"}
+    out = assemble_petition("SC", {**answers, "sc.county": "Richland"})
+    assert out["fields"]["petitioner"]["value"] == "[FACT NEEDED]"
+    assert "petitioner" in out["gaps"]
+
+
+def test_sc_missing_county_is_fact_needed():
+    out = assemble_petition("SC", _CA_ANSWERS)
+    assert out["fields"]["county"]["value"] == "[FACT NEEDED]"
+    assert "county" in out["gaps"]
+
+
+def test_sc_field_table_items_are_unique():
+    from vault.forms import sc
+
+    items = [f.item for f in sc.SC_PO_FIELDS]
+    assert len(items) == len(set(items))
+
+
 # --- route handler (POST /v1/vault/petition) ---
 
 

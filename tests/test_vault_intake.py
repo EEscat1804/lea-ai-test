@@ -1449,6 +1449,1193 @@ class TestWVIntake:
         assert step["step"] == "done"
 
 
+class TestOHIntake:
+    # OH is in the interpreter gate and is a physical-description AND vehicle state,
+    # plus the unconditional employer block and its own respondent dob, up to the
+    # OH county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "petitioner.interpreter_language": "English",
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.vehicle_make_model": "Honda",
+            "respondent.vehicle_color": "Blue",
+            "respondent.vehicle_plate": "ABC123",
+            "respondent.dob": "1985-01-01",
+        }
+    )
+
+    def test_oh_asks_county_then_ex_parte_then_who(self) -> None:
+        step = determine_next_step("OH", self._THROUGH_TIER2)
+        assert step["step"] == "oh.county"
+        step = determine_next_step("OH", {**self._THROUGH_TIER2, "oh.county": "Franklin"})
+        assert step["step"] == "oh.ex_parte"
+        step = determine_next_step(
+            "OH", {**self._THROUGH_TIER2, "oh.county": "Franklin", "oh.ex_parte": True}
+        )
+        assert step["step"] == "oh.who_needs_protection"
+
+    def test_oh_flows_who_to_aggravating_to_relief(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "oh.county": "Franklin",
+            "oh.ex_parte": True,
+            "oh.who_needs_protection": ["me"],
+        }
+        step = determine_next_step("OH", base)
+        assert step["step"] == "oh.aggravating_factors"
+        step = determine_next_step("OH", {**base, "oh.aggravating_factors": []})
+        assert step["step"] == "oh.relief"
+
+    def test_oh_exclusive_residence_asks_address(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "oh.county": "Franklin",
+            "oh.ex_parte": True,
+            "oh.who_needs_protection": ["me"],
+            "oh.aggravating_factors": [],
+            "oh.relief": ["exclusive_residence"],
+        }
+        step = determine_next_step("OH", answers)
+        assert step["step"] == "oh.residence_address"
+
+    def test_oh_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "oh.county": "Franklin",
+            "oh.ex_parte": True,
+            "oh.who_needs_protection": ["me"],
+            "oh.aggravating_factors": [],
+            "oh.relief": ["no_abuse"],
+        }
+        step = determine_next_step("OH", answers)
+        assert step["step"] == "done"
+
+
+class TestNDIntake:
+    # ND is a physical-description AND vehicle state (not in the interpreter gate),
+    # plus the unconditional employer block and its own respondent dob/race/gender,
+    # up to the ND county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.vehicle_make_model": "Honda",
+            "respondent.vehicle_color": "Blue",
+            "respondent.vehicle_plate": "ABC123",
+            "respondent.dob": "1985-01-01",
+            "respondent.race": "not disclosed",
+            "respondent.gender": "male",
+        }
+    )
+
+    def test_nd_asks_county_then_district_then_order_types(self) -> None:
+        step = determine_next_step("ND", self._THROUGH_TIER2)
+        assert step["step"] == "nd.county"
+        step = determine_next_step("ND", {**self._THROUGH_TIER2, "nd.county": "Cass"})
+        assert step["step"] == "nd.judicial_district"
+        step = determine_next_step(
+            "ND", {**self._THROUGH_TIER2, "nd.county": "Cass", "nd.judicial_district": "East"}
+        )
+        assert step["step"] == "nd.order_types"
+
+    def test_nd_flows_to_venue_then_relief(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "nd.county": "Cass",
+            "nd.judicial_district": "East",
+            "nd.order_types": ["domestic_violence"],
+        }
+        step = determine_next_step("ND", base)
+        assert step["step"] == "nd.venue"
+        step = determine_next_step("ND", {**base, "nd.venue": ["live_here"]})
+        assert step["step"] == "nd.relief"
+
+    def test_nd_exclude_places_asks_places_then_feet(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "nd.county": "Cass",
+            "nd.judicial_district": "East",
+            "nd.order_types": ["domestic_violence"],
+            "nd.venue": ["live_here"],
+            "nd.relief": ["exclude_places"],
+        }
+        step = determine_next_step("ND", base)
+        assert step["step"] == "nd.exclude_places"
+        step = determine_next_step("ND", {**base, "nd.exclude_places": ["residence"]})
+        assert step["step"] == "nd.stay_away_feet"
+
+    def test_nd_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "nd.county": "Cass",
+            "nd.judicial_district": "East",
+            "nd.order_types": ["domestic_violence"],
+            "nd.venue": ["live_here"],
+            "nd.relief": ["restrain_contact"],
+            "nd.notification": True,
+        }
+        step = determine_next_step("ND", answers)
+        assert step["step"] == "done"
+
+
+class TestNMIntake:
+    # NM is in the interpreter gate but none of the physical/vehicle/minor sets,
+    # so only the interpreter + unconditional employer blocks (and the NM block's
+    # respondent dob) precede the NM county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "petitioner.interpreter_language": "English",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.dob": "1985-01-01",
+        }
+    )
+
+    def test_nm_asks_county_then_district_then_drugs(self) -> None:
+        step = determine_next_step("NM", self._THROUGH_TIER2)
+        assert step["step"] == "nm.county"
+        step = determine_next_step("NM", {**self._THROUGH_TIER2, "nm.county": "Bernalillo"})
+        assert step["step"] == "nm.judicial_district"
+        step = determine_next_step(
+            "NM",
+            {**self._THROUGH_TIER2, "nm.county": "Bernalillo", "nm.judicial_district": "Second"},
+        )
+        assert step["step"] == "nm.drugs_alcohol"
+
+    def test_nm_flows_to_relief(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "nm.county": "Bernalillo",
+            "nm.judicial_district": "Second",
+            "nm.drugs_alcohol": False,
+        }
+        step = determine_next_step("NM", base)
+        assert step["step"] == "nm.prior_abuse"
+        step = determine_next_step("NM", {**base, "nm.prior_abuse": True})
+        assert step["step"] == "nm.relief"
+
+    def test_nm_support_asks_support_types(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "nm.county": "Bernalillo",
+            "nm.judicial_district": "Second",
+            "nm.drugs_alcohol": False,
+            "nm.prior_abuse": True,
+            "nm.relief": ["support"],
+        }
+        step = determine_next_step("NM", answers)
+        assert step["step"] == "nm.support_types"
+
+    def test_nm_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "nm.county": "Bernalillo",
+            "nm.judicial_district": "Second",
+            "nm.drugs_alcohol": False,
+            "nm.prior_abuse": True,
+            "nm.relief": ["no_contact_stay_away"],
+            "nm.respondent_in_jail": False,
+        }
+        step = determine_next_step("NM", answers)
+        assert step["step"] == "done"
+
+
+class TestNHIntake:
+    # NH is in none of the interpreter / physical / vehicle / minor sets (its form
+    # has no physical-description or vehicle block), so only the unconditional
+    # employer block precedes the NH respondent.dob step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    # Through the respondent + plaintiff demographic block, up to the court-name step.
+    _THROUGH_DEMO: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.sex": "M",
+        "petitioner.sex": "F",
+        "petitioner.race": "not disclosed",
+        "petitioner.ethnicity": "Refused",
+    }
+
+    def test_nh_skips_physical_and_vehicle(self) -> None:
+        # Carved out of both gates — the first NH-specific ask is respondent DOB,
+        # never height/weight or a vehicle make/model.
+        step = determine_next_step("NH", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+
+    def test_nh_asks_demographics_then_court_then_relief(self) -> None:
+        step = determine_next_step("NH", {**self._THROUGH_TIER2, "respondent.dob": "1985-01-01"})
+        assert step["step"] == "respondent.sex"
+        step = determine_next_step("NH", self._THROUGH_DEMO)
+        assert step["step"] == "nh.court_name"
+        step = determine_next_step("NH", {**self._THROUGH_DEMO, "nh.court_name": "Concord"})
+        assert step["step"] == "nh.relief"
+
+    def test_nh_exclusive_residence_asks_type_then_holder(self) -> None:
+        base = {
+            **self._THROUGH_DEMO,
+            "nh.court_name": "Concord",
+            "nh.relief": ["exclusive_residence"],
+        }
+        step = determine_next_step("NH", base)
+        assert step["step"] == "nh.residence_type"
+        step = determine_next_step("NH", {**base, "nh.residence_type": "rent"})
+        assert step["step"] == "nh.residence_holder"
+
+    def test_nh_pay_losses_asks_losses_then_other_detail(self) -> None:
+        base = {
+            **self._THROUGH_DEMO,
+            "nh.court_name": "Concord",
+            "nh.relief": ["pay_losses"],
+        }
+        step = determine_next_step("NH", base)
+        assert step["step"] == "nh.financial_losses"
+        step = determine_next_step("NH", {**base, "nh.financial_losses": ["other"]})
+        assert step["step"] == "nh.financial_losses_other"
+
+    def test_nh_court_actions_other_asks_court_list(self) -> None:
+        base = {
+            **self._THROUGH_DEMO,
+            "nh.court_name": "Concord",
+            "nh.relief": ["no_abuse_contact"],
+            "nh.court_actions": ["custody"],
+        }
+        step = determine_next_step("NH", base)
+        assert step["step"] == "nh.court_list"
+
+    def test_nh_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_DEMO,
+            "nh.court_name": "Concord",
+            "nh.relief": ["no_abuse_contact"],
+            "nh.court_actions": ["none"],
+        }
+        step = determine_next_step("NH", answers)
+        assert step["step"] == "done"
+
+
+class TestMTIntake:
+    # MT is in none of the interpreter / physical / vehicle / minor sets, and its
+    # form has no respondent DOB, so only the unconditional employer block precedes
+    # the MT court-type step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+
+    def test_mt_starts_at_court_type_not_respondent_dob(self) -> None:
+        # No physical/vehicle/respondent-dob ask — the first MT step is the court type.
+        step = determine_next_step("MT", self._THROUGH_TIER2)
+        assert step["step"] == "mt.court_type"
+        step = determine_next_step("MT", {**self._THROUGH_TIER2, "mt.court_type": "district"})
+        assert step["step"] == "mt.county"
+
+    def test_mt_living_then_relief(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "mt.court_type": "district",
+            "mt.county": "Lewis and Clark",
+        }
+        step = determine_next_step("MT", base)
+        assert step["step"] == "mt.living_situation"
+        step = determine_next_step(
+            "MT", {**base, "mt.living_situation": ["respondent_not_with_me"]}
+        )
+        assert step["step"] == "mt.relief"
+
+    def test_mt_left_residence_asks_return_reason(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "mt.court_type": "district",
+            "mt.county": "Lewis and Clark",
+            "mt.living_situation": ["left_residence"],
+        }
+        step = determine_next_step("MT", base)
+        assert step["step"] == "mt.return_reason"
+
+    def test_mt_stay_away_asks_feet_then_places(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "mt.court_type": "district",
+            "mt.county": "Lewis and Clark",
+            "mt.living_situation": ["respondent_not_with_me"],
+            "mt.relief": ["stay_away"],
+        }
+        step = determine_next_step("MT", base)
+        assert step["step"] == "mt.stay_away_feet"
+        step = determine_next_step("MT", {**base, "mt.stay_away_feet": "1000"})
+        assert step["step"] == "mt.stay_away_places"
+
+    def test_mt_parenting_only_when_children_in_common(self) -> None:
+        base = {
+            **self._THROUGH_TIER2,
+            "mt.court_type": "district",
+            "mt.county": "Lewis and Clark",
+            "mt.living_situation": ["respondent_not_with_me"],
+            "mt.relief": ["no_violence"],
+        }
+        # Tier-1 default has children_in_common False -> parenting is skipped.
+        step = determine_next_step("MT", base)
+        assert step["step"] == "mt.other_protected"
+        # With a child in common, parenting is asked before the trailing free-text.
+        step = determine_next_step("MT", {**base, "relationship.children_in_common": True})
+        assert step["step"] == "mt.parenting"
+
+    def test_mt_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_TIER2,
+            "mt.court_type": "district",
+            "mt.county": "Lewis and Clark",
+            "mt.living_situation": ["respondent_not_with_me"],
+            "mt.relief": ["no_violence"],
+            "mt.other_protected": "None",
+            "mt.other_cases": "None",
+        }
+        step = determine_next_step("MT", answers)
+        assert step["step"] == "done"
+
+
+class TestNVIntake:
+    # NV is in the interpreter gate (its form has an interpreter request) but none
+    # of the physical/vehicle/minor sets, so only the interpreter + unconditional
+    # employer blocks precede the NV court-type step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "petitioner.interpreter_language": "English",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    # Through the caption + who/grounds, up to the temporary-protections step.
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "nv.court_type": "justice",
+        "nv.township": "Reno",
+        "nv.county": "Washoe",
+        "nv.adverse_party_type": "adult",
+        "nv.adverse_in_custody": False,
+        "nv.who_needs_protection": ["me"],
+        "nv.protection_reason": ["dv_against_me"],
+    }
+
+    def test_nv_asks_interpreter_then_court_type(self) -> None:
+        # Drop the interpreter answer -> the shared interpreter gate fires for NV.
+        no_interp = {k: v for k, v in self._THROUGH_TIER2.items()
+                     if k != "petitioner.interpreter_language"}
+        assert determine_next_step("NV", no_interp)["step"] == "petitioner.interpreter_language"
+        # With it answered, the first NV-specific step is the court type.
+        assert determine_next_step("NV", self._THROUGH_TIER2)["step"] == "nv.court_type"
+
+    def test_nv_justice_court_asks_township(self) -> None:
+        step = determine_next_step("NV", {**self._THROUGH_TIER2, "nv.court_type": "justice"})
+        assert step["step"] == "nv.township"
+        # District court skips the township question.
+        step = determine_next_step("NV", {**self._THROUGH_TIER2, "nv.court_type": "district"})
+        assert step["step"] == "nv.county"
+
+    def test_nv_flows_through_caption_to_temp_protections(self) -> None:
+        step = determine_next_step("NV", self._THROUGH_GROUNDS)
+        assert step["step"] == "nv.temp_protections"
+
+    def test_nv_belongings_asks_address(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "nv.temp_protections": ["personal_belongings"]}
+        step = determine_next_step("NV", base)
+        assert step["step"] == "nv.belongings_address"
+
+    def test_nv_extended_order_asks_extended_relief(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "nv.temp_protections": ["prohibited_activities"],
+            "nv.order_length": "extended_2yr",
+        }
+        step = determine_next_step("NV", base)
+        assert step["step"] == "nv.extended_relief"
+
+    def test_nv_custody_only_when_children_in_common(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "nv.temp_protections": ["prohibited_activities"],
+            "relationship.children_in_common": True,
+        }
+        step = determine_next_step("NV", base)
+        assert step["step"] == "nv.custody"
+
+    def test_nv_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "nv.temp_protections": ["prohibited_activities"],
+            "nv.order_length": "temporary_45",
+            "nv.other_cases_detail": "None",
+        }
+        step = determine_next_step("NV", answers)
+        assert step["step"] == "done"
+
+
+class TestNEIntake:
+    # NE is in the interpreter gate AND a physical-description AND vehicle state
+    # (its DC 19:8 has a respondent block, the DC 19:1 praecipe a vehicle block),
+    # plus the unconditional employer block and its own respondent dob/race/sex,
+    # up to the NE county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "petitioner.interpreter_language": "English",
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.vehicle_make_model": "Honda",
+            "respondent.vehicle_color": "Blue",
+            "respondent.vehicle_plate": "ABC123",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.race": "not disclosed",
+        "respondent.gender": "male",
+    }
+
+    def test_ne_asks_respondent_description_then_county(self) -> None:
+        step = determine_next_step("NE", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("NE", self._THROUGH_DESC)
+        assert step["step"] == "ne.county"
+        step = determine_next_step("NE", {**self._THROUGH_DESC, "ne.county": "Lancaster"})
+        assert step["step"] == "ne.judge_type"
+
+    def test_ne_flows_to_relief(self) -> None:
+        base = {**self._THROUGH_DESC, "ne.county": "Lancaster", "ne.judge_type": "district"}
+        step = determine_next_step("NE", base)
+        assert step["step"] == "ne.relief"
+
+    def test_ne_custody_asks_days(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "ne.county": "Lancaster",
+            "ne.judge_type": "district",
+            "ne.relief": ["custody"],
+        }
+        step = determine_next_step("NE", base)
+        assert step["step"] == "ne.custody_days"
+
+    def test_ne_prior_cases_detail_only_when_prior_orders_exist(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "ne.county": "Lancaster",
+            "ne.judge_type": "district",
+            "ne.relief": ["no_abuse"],
+        }
+        # Tier-1 default prior_orders.exists is False -> detail is skipped -> done.
+        assert determine_next_step("NE", base)["step"] == "done"
+        # With a prior order, the detail is asked.
+        step = determine_next_step("NE", {**base, "prior_orders.exists": True})
+        assert step["step"] == "ne.prior_cases_detail"
+
+    def test_ne_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_DESC,
+            "ne.county": "Lancaster",
+            "ne.judge_type": "district",
+            "ne.relief": ["no_abuse"],
+        }
+        step = determine_next_step("NE", answers)
+        assert step["step"] == "done"
+
+
+class TestMEIntake:
+    # ME is in the physical-description AND vehicle states (its PA-005 service sheet
+    # carries those identifiers) and the minor-filing set, but NOT the interpreter or
+    # disability gate (PA-001/PA-005 have only ADA/Language footers, not fillable
+    # fields). So the physical + unconditional employer + vehicle blocks, then ME's
+    # own respondent dob/gender/race, precede the ME court-location step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.vehicle_make_model": "Honda",
+            "respondent.vehicle_color": "Blue",
+            "respondent.vehicle_plate": "ABC123",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.gender": "male",
+        "respondent.race": "unknown",
+    }
+
+    def test_me_asks_respondent_description_then_court_location(self) -> None:
+        # No interpreter/disability ask — the first ME step is respondent dob.
+        step = determine_next_step("ME", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("ME", self._THROUGH_DESC)
+        assert step["step"] == "me.court_location"
+        step = determine_next_step("ME", {**self._THROUGH_DESC, "me.court_location": "Portland"})
+        assert step["step"] == "me.defendant_military"
+
+    def test_me_flows_to_relationship_then_relief(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "me.court_location": "Portland",
+            "me.defendant_military": "unknown",
+        }
+        step = determine_next_step("ME", base)
+        assert step["step"] == "me.relationship_basis"
+        step = determine_next_step("ME", {**base, "me.relationship_basis": ["married"]})
+        assert step["step"] == "me.temporary_order"
+        step = determine_next_step(
+            "ME",
+            {**base, "me.relationship_basis": ["married"], "me.temporary_order": ["self_danger"]},
+        )
+        assert step["step"] == "me.relief"
+
+    def test_me_stay_distance_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "me.court_location": "Portland",
+            "me.defendant_military": "unknown",
+            "me.relationship_basis": ["married"],
+            "me.temporary_order": ["self_danger"],
+            "me.relief": ["stay_distance"],
+        }
+        step = determine_next_step("ME", base)
+        assert step["step"] == "me.stay_distance_detail"
+
+    def test_me_weapon_used_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "me.court_location": "Portland",
+            "me.defendant_military": "unknown",
+            "me.relationship_basis": ["married"],
+            "me.temporary_order": ["self_danger"],
+            "me.relief": ["no_contact"],
+            "me.weapon_access": [],
+        }
+        # Empty weapon-access list skips the weapon-detail follow-up.
+        step = determine_next_step("ME", base)
+        assert step["step"] == "me.weapon_ever_used"
+        # Saying yes asks what happened.
+        step = determine_next_step("ME", {**base, "me.weapon_ever_used": True})
+        assert step["step"] == "me.weapon_used_detail"
+
+    def test_me_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_DESC,
+            "me.court_location": "Portland",
+            "me.defendant_military": "unknown",
+            "me.relationship_basis": ["married"],
+            "me.temporary_order": ["self_danger"],
+            "me.relief": ["no_contact"],
+            "me.weapon_access": [],
+            "me.weapon_ever_used": False,
+            "me.other_cases_detail": "None",
+        }
+        step = determine_next_step("ME", answers)
+        assert step["step"] == "done"
+
+
+class TestMIIntake:
+    # MI is in NONE of the physical / vehicle / interpreter / disability / minor sets
+    # (CC 375 has no respondent description or vehicle block, and a minor petitions
+    # through a "next friend", not the shared minor path). So only the unconditional
+    # employer block precedes the MI county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_CAPTION: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "mi.county": "Wayne",
+        "mi.relationship": ["married"],
+        "mi.respondent_carries_firearm": "unknown",
+        "mi.ex_parte": True,
+    }
+
+    def test_mi_starts_at_county_no_physical_or_vehicle(self) -> None:
+        # No physical/vehicle ask — the first MI step is the county.
+        step = determine_next_step("MI", self._THROUGH_TIER2)
+        assert step["step"] == "mi.county"
+        step = determine_next_step("MI", {**self._THROUGH_TIER2, "mi.county": "Wayne"})
+        assert step["step"] == "mi.relationship"
+
+    def test_mi_flows_through_caption_to_relief(self) -> None:
+        step = determine_next_step("MI", self._THROUGH_CAPTION)
+        assert step["step"] == "mi.relief"
+
+    def test_mi_stalking_relief_asks_acts(self) -> None:
+        base = {**self._THROUGH_CAPTION, "mi.relief": ["stalking"]}
+        step = determine_next_step("MI", base)
+        assert step["step"] == "mi.stalking_acts"
+
+    def test_mi_animal_relief_asks_acts(self) -> None:
+        base = {**self._THROUGH_CAPTION, "mi.relief": ["animal_abuse"]}
+        step = determine_next_step("MI", base)
+        assert step["step"] == "mi.animal_acts"
+
+    def test_mi_assault_relief_asks_names(self) -> None:
+        base = {**self._THROUGH_CAPTION, "mi.relief": ["assault"]}
+        step = determine_next_step("MI", base)
+        assert step["step"] == "mi.assault_names"
+
+    def test_mi_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_CAPTION,
+            # item a (enter_my_property) has no conditional follow-up.
+            "mi.relief": ["enter_my_property"],
+            "mi.other_cases_detail": "None",
+        }
+        step = determine_next_step("MI", answers)
+        assert step["step"] == "done"
+
+
+class TestIAIntake:
+    # IA is in MINOR_FILING_STATES but NOT the physical / vehicle / interpreter /
+    # disability sets (Form 11 has no respondent description or vehicle block — the §20
+    # vehicle is the petitioner's car). So only the unconditional employer block
+    # precedes the IA county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "ia.county": "Polk",
+        "ia.defendant_minor": "no",
+        "ia.relationship_basis": ["intimate_relationship"],
+        "ia.abuse_types": ["physical"],
+        "ia.order_request": ["temporary", "final"],
+    }
+
+    def test_ia_starts_at_county_no_physical_or_vehicle(self) -> None:
+        step = determine_next_step("IA", self._THROUGH_TIER2)
+        assert step["step"] == "ia.county"
+        step = determine_next_step("IA", {**self._THROUGH_TIER2, "ia.county": "Polk"})
+        assert step["step"] == "ia.defendant_minor"
+
+    def test_ia_flows_through_grounds_to_relief(self) -> None:
+        step = determine_next_step("IA", self._THROUGH_GROUNDS)
+        assert step["step"] == "ia.relief"
+
+    def test_ia_financial_support_asks_detail(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "ia.relief": ["financial_support"]}
+        step = determine_next_step("IA", base)
+        assert step["step"] == "ia.support_detail"
+
+    def test_ia_possession_vehicle_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "ia.relief": ["stop_abuse"],
+            "ia.possession_requests": ["vehicle"],
+        }
+        step = determine_next_step("IA", base)
+        assert step["step"] == "ia.vehicle_detail"
+
+    def test_ia_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "ia.relief": ["stop_abuse"],
+            "ia.possession_requests": [],
+            "ia.counseling": ["no_one"],
+            "ia.confidential_requests": ["seal_file"],
+        }
+        step = determine_next_step("IA", answers)
+        assert step["step"] == "done"
+
+
+class TestKYIntake:
+    # KY is in PHYSICAL_DESCRIPTION_STATES (the AOC-275.1 identifier box has a
+    # description) but carved OUT of VEHICLE_DESCRIPTION_STATES (no vehicle field) and
+    # not in the interpreter gate. So the physical + unconditional employer blocks, then
+    # KY's own respondent dob/sex/race, precede the KY county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.gender": "male",
+        "respondent.race": "unknown",
+    }
+
+    def test_ky_asks_description_then_county_skips_vehicle(self) -> None:
+        # Physical asked, but no vehicle ask — after the description, the first KY step
+        # is respondent dob, then the county.
+        step = determine_next_step("KY", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("KY", self._THROUGH_DESC)
+        assert step["step"] == "ky.county"
+
+    def test_ky_skips_vehicle_block(self) -> None:
+        # KY is carved out of the vehicle gate — vehicle questions must never be asked.
+        no_vehicle_keys = {
+            "respondent.vehicle_make_model",
+            "respondent.vehicle_color",
+            "respondent.vehicle_plate",
+        }
+        seen: set[str] = set()
+        answers = dict(self._THROUGH_DESC)
+        for _ in range(40):
+            step = determine_next_step("KY", answers)
+            if step["step"] == "done":
+                break
+            seen.add(step["step"])
+            answers[step["step"]] = [] if step["schema"].get("type") == "array" else "x"
+        assert not (seen & no_vehicle_keys)
+
+    def test_ky_flows_to_relief(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "ky.county": "Jefferson",
+            "ky.relationship_basis": ["married"],
+            "ky.caution": [],
+            "ky.ex_parte": True,
+        }
+        step = determine_next_step("KY", base)
+        assert step["step"] == "ky.relief"
+
+    def test_ky_vacate_residence_asks_address(self) -> None:
+        base = {
+            **self._THROUGH_DESC,
+            "ky.county": "Jefferson",
+            "ky.relationship_basis": ["married"],
+            "ky.caution": [],
+            "ky.ex_parte": True,
+            "ky.relief": ["vacate_residence"],
+        }
+        step = determine_next_step("KY", base)
+        assert step["step"] == "ky.vacate_address"
+
+    def test_ky_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_DESC,
+            "ky.county": "Jefferson",
+            "ky.relationship_basis": ["married"],
+            "ky.caution": [],
+            "ky.ex_parte": True,
+            "ky.relief": ["no_further_acts"],
+        }
+        step = determine_next_step("KY", answers)
+        assert step["step"] == "done"
+
+
+class TestLAIntake:
+    # LA is in the interpreter gate (LPOR B §3a has an interpreter request) but carved
+    # OUT of the physical AND vehicle gates (LPOR B has neither block). So only the
+    # interpreter + unconditional employer blocks precede the LA parish step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "petitioner.interpreter_language": "English",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "la.parish": "Orleans",
+        "la.venue": ["protected_resides"],
+        "la.relationship_basis": ["spouse"],
+        "la.abuse_types": ["slapped"],
+        "la.danger_indicators": [],
+    }
+
+    def test_la_asks_interpreter_then_parish_no_physical(self) -> None:
+        # Drop the interpreter answer -> the shared interpreter gate fires for LA.
+        no_interp = {
+            k: v for k, v in self._THROUGH_TIER2.items() if k != "petitioner.interpreter_language"
+        }
+        assert determine_next_step("LA", no_interp)["step"] == "petitioner.interpreter_language"
+        # With it answered, the first LA-specific step is the parish (no physical ask).
+        assert determine_next_step("LA", self._THROUGH_TIER2)["step"] == "la.parish"
+
+    def test_la_flows_through_grounds_to_relief(self) -> None:
+        step = determine_next_step("LA", self._THROUGH_GROUNDS)
+        assert step["step"] == "la.relief"
+
+    def test_la_stay_away_residence_asks_address(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "la.relief": ["stay_away_residence"]}
+        step = determine_next_step("LA", base)
+        assert step["step"] == "la.residence_address"
+
+    def test_la_other_request_other_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "la.relief": ["no_abuse"],
+            "la.other_requests": ["other"],
+        }
+        step = determine_next_step("LA", base)
+        assert step["step"] == "la.other_detail"
+
+    def test_la_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "la.relief": ["no_abuse"],
+            "la.other_requests": [],
+        }
+        step = determine_next_step("LA", answers)
+        assert step["step"] == "done"
+
+
+class TestIDIntake:
+    # ID (package vault.forms.idaho) is in NONE of the physical / vehicle / interpreter /
+    # minor sets (CAO DV 1-1 has no respondent description or vehicle block). So only the
+    # unconditional employer block precedes the ID county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "id.county": "Ada",
+        "id.petition_type": ["domestic_violence"],
+        "id.relationship_basis": ["spouse"],
+    }
+
+    def test_id_starts_at_county_no_physical_or_vehicle(self) -> None:
+        step = determine_next_step("ID", self._THROUGH_TIER2)
+        assert step["step"] == "id.county"
+        step = determine_next_step("ID", {**self._THROUGH_TIER2, "id.county": "Ada"})
+        assert step["step"] == "id.petition_type"
+
+    def test_id_flows_to_relief(self) -> None:
+        step = determine_next_step("ID", self._THROUGH_GROUNDS)
+        assert step["step"] == "id.relief"
+
+    def test_id_stay_away_asks_places(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "id.relief": ["stay_away"]}
+        step = determine_next_step("ID", base)
+        assert step["step"] == "id.stay_away_places"
+
+    def test_id_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            # child_custody has no conditional follow-up.
+            "id.relief": ["child_custody"],
+            "id.other_cases": "None",
+        }
+        step = determine_next_step("ID", answers)
+        assert step["step"] == "done"
+
+
+class TestMNIntake:
+    # MN is carved OUT of the physical gate (OFP102 has only respondent race/gender/DOB,
+    # no height/weight block) and is not in the vehicle or interpreter gates, but IS in
+    # the minor-filing set. So the unconditional employer block, then MN's own respondent
+    # dob/gender/race, precede the MN county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.gender": "male",
+        "respondent.race": "not disclosed",
+    }
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_DESC,
+        "mn.county": "Hennepin",
+        "mn.relationship_basis": ["married"],
+        "mn.immediate_danger": True,
+    }
+
+    def test_mn_asks_respondent_desc_then_county_no_physical(self) -> None:
+        # No height/weight ask — the first MN step is respondent dob.
+        step = determine_next_step("MN", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("MN", self._THROUGH_DESC)
+        assert step["step"] == "mn.county"
+
+    def test_mn_flows_to_relief(self) -> None:
+        step = determine_next_step("MN", self._THROUGH_GROUNDS)
+        assert step["step"] == "mn.relief"
+
+    def test_mn_hearing_financial_support_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "mn.relief": ["no_harm"],
+            "mn.hearing_relief": ["financial_support"],
+        }
+        step = determine_next_step("MN", base)
+        assert step["step"] == "mn.support_detail"
+
+    def test_mn_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "mn.relief": ["no_harm"],
+            "mn.hearing_relief": [],
+            "mn.other_cases": "None",
+        }
+        step = determine_next_step("MN", answers)
+        assert step["step"] == "done"
+
+
+class TestMSIntake:
+    # MS IS in the physical gate (the §4 block has a description) but carved OUT of the
+    # vehicle gate (no vehicle field) and not in the minor / interpreter sets. So the
+    # physical + unconditional employer blocks, then MS's own respondent dob/sex/race,
+    # precede the MS county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.gender": "male",
+        "respondent.race": "unknown",
+    }
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_DESC,
+        "ms.county": "Hinds",
+        "ms.court_type": "justice",
+        "ms.emergency_relief": True,
+        "ms.relationship_basis": ["current_former_spouse"],
+        "ms.abuse_acts": ["attempted_bodily_injury"],
+        "ms.caution": [],
+    }
+
+    def test_ms_asks_desc_then_county_skips_vehicle(self) -> None:
+        step = determine_next_step("MS", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("MS", self._THROUGH_DESC)
+        assert step["step"] == "ms.county"
+
+    def test_ms_flows_to_relief(self) -> None:
+        step = determine_next_step("MS", self._THROUGH_GROUNDS)
+        assert step["step"] == "ms.relief"
+
+    def test_ms_chancery_relief_only_in_chancery_or_county_court(self) -> None:
+        # Justice court (default in _THROUGH_GROUNDS) skips the Chancery/County relief.
+        base = {**self._THROUGH_GROUNDS, "ms.relief": ["prohibit_abuse"]}
+        assert determine_next_step("MS", base)["step"] == "ms.other_cases"
+        # Chancery court is asked the custody/support relief.
+        chancery = {**base, "ms.court_type": "chancery"}
+        assert determine_next_step("MS", chancery)["step"] == "ms.chancery_relief"
+
+    def test_ms_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "ms.relief": ["prohibit_abuse"],
+            "ms.other_cases": "None",
+        }
+        step = determine_next_step("MS", answers)
+        assert step["step"] == "done"
+
+
+class TestINIntake:
+    # IN (package vault.forms.indiana) is in NONE of the physical / vehicle / interpreter /
+    # minor sets (OJA-PO-0100 has only §3 respondent age, no description or vehicle block).
+    # So only the unconditional employer block precedes the IN county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "in.county": "Marion",
+        "respondent.age": "40",
+        "in.victim_basis": ["dv_family_violence"],
+        "in.relationship_basis": ["spouse"],
+        "in.venue": ["i_live"],
+        "in.abuse_acts": ["caused_harm"],
+    }
+
+    def test_in_starts_at_county_no_physical_or_vehicle(self) -> None:
+        step = determine_next_step("IN", self._THROUGH_TIER2)
+        assert step["step"] == "in.county"
+        step = determine_next_step("IN", {**self._THROUGH_TIER2, "in.county": "Marion"})
+        assert step["step"] == "respondent.age"
+
+    def test_in_flows_to_relief(self) -> None:
+        step = determine_next_step("IN", self._THROUGH_GROUNDS)
+        assert step["step"] == "in.relief"
+
+    def test_in_stay_away_asks_location(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "in.relief": ["stay_away"]}
+        step = determine_next_step("IN", base)
+        assert step["step"] == "in.stay_away_location"
+
+    def test_in_hearing_support_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "in.relief": ["prohibit_dv"],
+            "in.hearing_relief": ["child_support"],
+        }
+        step = determine_next_step("IN", base)
+        assert step["step"] == "in.support_detail"
+
+    def test_in_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "in.relief": ["prohibit_dv"],
+            "in.hearing_relief": [],
+        }
+        step = determine_next_step("IN", answers)
+        assert step["step"] == "done"
+
+
+class TestMOIntake:
+    # MO IS in the physical AND vehicle gates (the §A block has a description; §B asks the
+    # vehicle) and the minor set. So the physical + employer + vehicle blocks, then MO's
+    # own respondent age/sex/race, precede the MO county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.height": "6'0",
+            "respondent.weight": "180",
+            "respondent.eye_color": "Brown",
+            "respondent.hair_color": "Black",
+            "respondent.distinguishing_marks": "None",
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+            "respondent.vehicle_make_model": "Ford F-150",
+            "respondent.vehicle_color": "Red",
+            "respondent.vehicle_plate": "MO-123",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.age": "40",
+        "respondent.gender": "male",
+        "respondent.race": "unknown",
+    }
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_DESC,
+        "mo.county": "Jackson",
+        "mo.venue": ["i_live"],
+        "mo.relationship_basis": ["spouse"],
+        "mo.abuse_acts": ["caused_harm"],
+        "mo.ex_parte_basis": ["immediate_danger"],
+    }
+
+    def test_mo_asks_desc_then_county(self) -> None:
+        step = determine_next_step("MO", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.age"
+        step = determine_next_step("MO", self._THROUGH_DESC)
+        assert step["step"] == "mo.county"
+
+    def test_mo_flows_to_relief(self) -> None:
+        step = determine_next_step("MO", self._THROUGH_GROUNDS)
+        assert step["step"] == "mo.relief"
+
+    def test_mo_serious_danger_asked_after_relief(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "mo.relief": ["no_dv"]}
+        step = determine_next_step("MO", base)
+        assert step["step"] == "mo.serious_danger"
+
+    def test_mo_custody_asks_detail(self) -> None:
+        base = {
+            **self._THROUGH_GROUNDS,
+            "mo.relief": ["no_dv"],
+            "mo.serious_danger": False,
+            "mo.additional_relief": ["custody"],
+        }
+        step = determine_next_step("MO", base)
+        assert step["step"] == "mo.custody_detail"
+
+    def test_mo_reaches_done_when_fully_answered(self) -> None:
+        answers = {
+            **self._THROUGH_GROUNDS,
+            "mo.relief": ["no_dv"],
+            "mo.serious_danger": False,
+            "mo.additional_relief": [],
+        }
+        step = determine_next_step("MO", answers)
+        assert step["step"] == "done"
+
+
+class TestSCIntake:
+    # SC is carved OUT of the physical gate (SCCA 425 §4 has only respondent DOB/race/sex)
+    # and the vehicle gate (no vehicle block), but IS in the minor set. So the unconditional
+    # employer block, then SC's own respondent dob/race/sex, precede the SC county step.
+    _THROUGH_TIER2: ClassVar[dict[str, object]] = _answers(
+        **{
+            "respondent.employer_name": "Corp",
+            "respondent.employer_address": "1 Work Way",
+        }
+    )
+    _THROUGH_DESC: ClassVar[dict[str, object]] = {
+        **_THROUGH_TIER2,
+        "respondent.dob": "1985-01-01",
+        "respondent.race": "unknown",
+        "respondent.gender": "male",
+    }
+    _THROUGH_GROUNDS: ClassVar[dict[str, object]] = {
+        **_THROUGH_DESC,
+        "sc.county": "Richland",
+        "sc.venue": ["abuse_occurred"],
+        "sc.relationship_basis": ["married"],
+    }
+
+    def test_sc_asks_desc_then_county_no_physical(self) -> None:
+        step = determine_next_step("SC", self._THROUGH_TIER2)
+        assert step["step"] == "respondent.dob"
+        step = determine_next_step("SC", self._THROUGH_DESC)
+        assert step["step"] == "sc.county"
+
+    def test_sc_flows_to_relief(self) -> None:
+        step = determine_next_step("SC", self._THROUGH_GROUNDS)
+        assert step["step"] == "sc.relief"
+
+    def test_sc_custody_asks_detail(self) -> None:
+        base = {**self._THROUGH_GROUNDS, "sc.relief": ["custody"]}
+        step = determine_next_step("SC", base)
+        assert step["step"] == "sc.custody_detail"
+
+    def test_sc_reaches_done_when_fully_answered(self) -> None:
+        answers = {**self._THROUGH_GROUNDS, "sc.relief": ["no_abuse"]}
+        step = determine_next_step("SC", answers)
+        assert step["step"] == "done"
+
+
 class TestRoutingAndHandoff:
     # Cross-cutting routing: the first step, and the no-paper states that hand off to
     # an external portal after Tier-1.
