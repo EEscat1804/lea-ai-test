@@ -12,6 +12,7 @@ from typing import Any
 from guardrails.classifier import classify_message, process_message_endpoint
 from lib.auth import authorize
 from lib.responses import json_response, problem_response
+from memory.api import handle_context, handle_extraction_prompt, handle_review
 from persona.system_prompts import compose_system_prompt
 from vault.intake import handle_intake_step
 from vault.petition import handle_petition_request
@@ -48,6 +49,18 @@ async def on_fetch(request, env):  # type: ignore[no-untyped-def]
     if path == "/v1/vault/petition" and method == "POST":
         body = await _read_json_body(request)
         return await handle_petition_request(body, env)
+
+    if path == "/v1/memory/extraction-prompt" and method == "POST":
+        body = await _read_json_body(request)
+        return await handle_extraction_prompt(body, env)
+
+    if path == "/v1/memory/review" and method == "POST":
+        body = await _read_json_body(request)
+        return await handle_review(body, env)
+
+    if path == "/v1/memory/context" and method == "POST":
+        body = await _read_json_body(request)
+        return await handle_context(body, env)
 
     if path == "/v1/persona/prompt" and method == "GET":
         persona = _query_param(url, "persona") or "default"

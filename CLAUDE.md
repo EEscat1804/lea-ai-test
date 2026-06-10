@@ -11,6 +11,7 @@ The whole product is built for **survivors of domestic, sexual, and tech-facilit
 1. **Vault** — DVRO petition intake state machine (47 US jurisdictions). Pure function `(jurisdiction, answers-so-far) → next question`. State lives in lea-be-core's DB; we are stateless.
 2. **Guardrails** — input/output safety classifiers (crisis detection, legal-advice overreach, PII leak detection).
 3. **Persona** — system-prompt registry. Prompt edits are code reviews, not config tweaks.
+4. **Memory** — the AI contracts for "Lea remembers your story" (`src/memory/`): the extraction prompt, the deterministic review gate over model-proposed memories, and the recall context block. Storage, consent, and encryption live in lea-be-core; memories ride the request both ways. Only user-stated facts may pass review; the user's own self-harm statements, credentials, and inferred facts never may. Abuse-history facts MUST pass — remembering them is the feature.
 
 ## What lea-ai does NOT own
 
