@@ -33,6 +33,8 @@ from guardrails.rules import (
     G17_TRIGGERS,
     G18_TRIGGERS,
     G20_TRIGGERS,
+    G21_DOCUMENT_TRIGGERS,
+    G21_RECORDING_TRIGGERS,
     IMPLICIT_CRISIS_TRIGGERS,
     NAME_REQUEST_TRIGGERS,
     NO_DIAGNOSIS_LABELS,
@@ -336,6 +338,21 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
         ],
     ):
         return build_response(RESP["G_third_party_block"], session, tier=0, prompt=user_prompt)
+
+    # -----------------------------------------------------------------------
+    # G-21 evidence hygiene — discovery-aware guidance (Tier 0)
+    #
+    # Runs AFTER Tier-3 crisis and the bright-line blocks so it can never
+    # override safety routing. Steers a user about to record someone, or to log
+    # "everything," toward lower-risk, legally-safer evidence. This is guidance,
+    # not enforcement: lea-ai is stateless and cannot block a write — the
+    # structural archive-minimization protection is lea-be-core's to own.
+    # -----------------------------------------------------------------------
+    if matches_any(pl, G21_RECORDING_TRIGGERS):
+        return build_response(RESP["G21_recording"], session, tier=0, prompt=user_prompt)
+
+    if matches_any(pl, G21_DOCUMENT_TRIGGERS):
+        return build_response(RESP["G21_document"], session, tier=0, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # POLYMORPHIC DECOUPLED DISPATCH LOOP (Anti-Superfile Architecture)

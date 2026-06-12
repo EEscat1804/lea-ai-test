@@ -69,6 +69,20 @@ def test_persona_text_points_to_on_device_safety_tools() -> None:
     assert "disguise" in persona
 
 
+def test_persona_text_carries_legal_discovery_disclosure() -> None:
+    # A survivor who believes the app's entries are legally private may over-disclose
+    # into something the other side can later subpoena. The persona must carry the
+    # honest discovery / no-privilege limit AND the right-to-silence reminder.
+    # Whitespace-normalized so source line-wrapping can't break the assertions.
+    flat = re.sub(r"\s+", " ", DEFAULT_PERSONA).lower()
+    assert "this is information, not legal advice" in flat
+    assert "discovery" in flat
+    assert "no special legal privilege" in flat
+    assert "right to stay silent" in flat
+    # Wiretap / all-party-consent guard from the spec's §4.
+    assert "without their consent is illegal" in flat
+
+
 def test_persona_text_excludes_internal_terms() -> None:
     # DEFAULT_PERSONA reaches Gemini and shapes user-facing replies. It must not
     # carry backend internals that could disclose security posture to an abuser.

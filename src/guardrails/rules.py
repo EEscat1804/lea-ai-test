@@ -410,6 +410,29 @@ G20_TRIGGERS: list[str] = [
     r"(shared|his|her) (device|computer|phone)",
 ]
 
+# G-21: Evidence hygiene — discovery-aware guidance
+#
+# The user asking to RECORD someone, or to write/log EVERYTHING, is the moment
+# Lea can steer toward low-risk evidence before a harmful record exists. These
+# are user *questions* (low false-positive), so a tier-0 steer is safe. The
+# structural protection (not compiling a discoverable archive) is lea-be-core's;
+# this is only the conversational guidance layer — Lea cannot block a write here.
+G21_RECORDING_TRIGGERS: list[str] = [
+    r"(secretly|covertly|quietly) record",
+    r"(can|should|may) i record",
+    r"record (him|her|them|his|the (call|conversation))",
+    r"tape (him|her|them|the (call|conversation))",
+    r"get (it|him|her|them) on (tape|video|audio|camera|recording)",
+]
+
+G21_DOCUMENT_TRIGGERS: list[str] = [
+    r"(should|do|can) i (write|journal|log|document|record).{0,20}(this|it|everything|all)",
+    r"write (all of |down )?(this|it|everything) down",
+    r"write down everything",
+    r"document everything",
+    r"keep a (diary|journal|log|record) (of|about|on)",
+]
+
 
 # ---------------------------------------------------------------------------
 # RESPONSE TEMPLATES
@@ -529,6 +552,26 @@ RESP: dict[str, str] = {
     "G_third_party_block": (
         "Conversations in this system are private and encrypted. "
         "Session content is not accessible to outside parties."
+    ),
+    "G21_recording": (
+        "Be careful here. In some states it is illegal to record someone — even "
+        "the person hurting you — without their consent, and an illegal recording "
+        "can end up hurting your case instead of helping it. I can't help you "
+        "secretly record him. What is safe to keep, and often stronger, are the "
+        "messages, texts, and voicemails he sends you in his own words. "
+        "Want help saving those, or thinking through what's legal where you live?"
+    ),
+    "G21_document": (
+        "Writing things down can really help — and how you do it matters. Short, "
+        "factual notes are both the strongest and the safest: the date, the time, "
+        "and what happened, in a sentence or two. One honest thing to know: what's "
+        "stored in an app like this can later be requested by the other side's "
+        "lawyers — that's called discovery — and it isn't legally protected the "
+        "way talking to your own lawyer or a shelter advocate is. So go gentle on "
+        "long, emotional retellings kept in a permanent log, and never feel you "
+        "have to write down anything that could be turned against you — you have "
+        "the right to stay silent. Want me to help you turn what happened into a "
+        "short, factual entry?"
     ),
     "G_name_invite": (
         "I can help you put a name to what's happening — it often makes it easier to trust "
