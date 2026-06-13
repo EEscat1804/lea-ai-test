@@ -33,7 +33,8 @@ from guardrails.rules import (
     G17_TRIGGERS,
     G18_TRIGGERS,
     G20_TRIGGERS,
-    G21_DOCUMENT_TRIGGERS,
+    G21_DOCUMENT_ASK_TRIGGERS,
+    G21_RECORD_INTENT_TRIGGERS,
     G21_RECORDING_TRIGGERS,
     IMPLICIT_CRISIS_TRIGGERS,
     NAME_REQUEST_TRIGGERS,
@@ -351,8 +352,17 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
     if matches_any(pl, G21_RECORDING_TRIGGERS):
         return build_response(RESP["G21_recording"], session, tier=0, prompt=user_prompt)
 
-    if matches_any(pl, G21_DOCUMENT_TRIGGERS):
+    # Explicit intent to compile/commit a record ("everything", a destination, or
+    # "for court") → the discovery caution is apt. Checked BEFORE the ambiguous
+    # ask, so "save this to my journal" / "document this for court" get the caution.
+    if matches_any(pl, G21_RECORD_INTENT_TRIGGERS):
         return build_response(RESP["G21_document"], session, tier=0, prompt=user_prompt)
+
+    # Ambiguous "should I write this down?" — could be venting OR evidence. Don't
+    # assume: lead with listening and ASK which they want, before any legal caution.
+    # The risk is in the stored record, not in talking — so never gate the venting.
+    if matches_any(pl, G21_DOCUMENT_ASK_TRIGGERS):
+        return build_response(RESP["G21_document_ask"], session, tier=0, prompt=user_prompt)
 
     # -----------------------------------------------------------------------
     # POLYMORPHIC DECOUPLED DISPATCH LOOP (Anti-Superfile Architecture)

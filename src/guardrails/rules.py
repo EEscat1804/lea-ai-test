@@ -425,12 +425,24 @@ G21_RECORDING_TRIGGERS: list[str] = [
     r"get (it|him|her|them) on (tape|video|audio|camera|recording)",
 ]
 
-G21_DOCUMENT_TRIGGERS: list[str] = [
-    r"(should|do|can) i (write|journal|log|document|record).{0,20}(this|it|everything|all)",
-    r"write (all of |down )?(this|it|everything) down",
-    r"write down everything",
-    r"document everything",
+# Ambiguous "should I write this down?" — could mean "I need to get this out" OR
+# "I want evidence." DON'T assume: the discovery risk is in the *stored record*,
+# not in talking, so Lea leads with listening and ASKS which they want before any
+# legal caution. Singular this/it/that, no "everything" and no destination.
+G21_DOCUMENT_ASK_TRIGGERS: list[str] = [
+    r"(should|do|can|could) i (write|journal|log|jot|note|document) (all )?(this|it|that)( down| out)?",
+]
+
+# Explicit intent to COMPILE or COMMIT to a record — "everything", a destination
+# (journal/vault/case/file), or "for court/evidence." Here the discovery caution
+# is the right response: a permanent, detailed archive is the actual liability.
+G21_RECORD_INTENT_TRIGGERS: list[str] = [
+    r"(write|log|journal|record|document) (down )?everything",
+    r"write everything down",
     r"keep a (diary|journal|log|record) (of|about|on)",
+    r"save (this|it|that|these).{0,20}(journal|vault|note|record|case|file)",
+    r"add (this|it|that|these).{0,20}(journal|vault|case|file|record)",
+    r"(for|as) (my )?(case|court|evidence|the judge|a record|proof)",
 ]
 
 
@@ -572,6 +584,16 @@ RESP: dict[str, str] = {
         "have to write down anything that could be turned against you — you have "
         "the right to stay silent. Want me to help you turn what happened into a "
         "short, factual entry?"
+    ),
+    # Ambiguous documentation intent — lead with listening, never assume she's
+    # building evidence. Offer the factual-record path as a *choice*, and ask;
+    # the discovery caution (G21_document) only comes once she signals she wants
+    # to save. This keeps the release valve open for someone who needs to vent.
+    "G21_document_ask": (
+        "I'm here for all of it — if you just need to get this out, go ahead, "
+        "I'm listening. And whenever you want, I can also help you keep a short, "
+        "factual version for your records, kept separate from this. "
+        "Which would help more right now?"
     ),
     "G_name_invite": (
         "I can help you put a name to what's happening — it often makes it easier to trust "
