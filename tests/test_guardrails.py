@@ -425,3 +425,74 @@ def test_naming_never_overrides_tier_3_crisis() -> None:
     )
     assert result["tier"] == 3
     assert "1-800-799-7233" in result["response"]
+
+
+# ---------------------------------------------------------------------------
+# G-21 evidence hygiene — discovery-aware guidance (Tier 0)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "can I record him when he yells at me?",
+        "should I secretly record his threats",
+        "how do I get him on tape",
+    ],
+)
+def test_g21_recording_steers_to_consent_and_his_own_messages(prompt: str) -> None:
+    result = process_message(prompt, SessionState())
+    assert result["tier"] == 0
+    r = result["response"].lower()
+    assert "consent" in r  # names the all-party-consent / wiretap risk
+    assert "messages" in r  # steers to his own messages instead of secret taping
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "do I document everything that happens?",
+        "I want to keep a journal of every incident",
+        "should I save this to my journal?",
+        "should I write this down for court?",
+    ],
+)
+def test_g21_record_intent_steers_to_short_facts_and_names_discovery(prompt: str) -> None:
+    # Explicit intent to compile/commit a record → the discovery caution is apt.
+    result = process_message(prompt, SessionState())
+    assert result["tier"] == 0
+    r = result["response"].lower()
+    assert "discovery" in r  # names that stored content is discoverable
+    assert "stay silent" in r  # reminds of the right to silence
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "should I write all this down?",
+        "should I write this down?",
+        "should I document this?",
+    ],
+)
+def test_g21_ambiguous_write_asks_before_cautioning(prompt: str) -> None:
+    # "should I write this down?" can mean "I need to vent" OR "I want evidence."
+    # Lea must lead with listening and ASK which — never pre-emptively lecture about
+    # discovery, which would tell a venting survivor her feelings are a liability.
+    result = process_message(prompt, SessionState())
+    assert result["tier"] == 0
+    r = result["response"].lower()
+    assert "listening" in r  # leads with being heard
+    assert "factual" in r  # offers the record path as a choice
+    assert "?" in result["response"]  # asks rather than assumes
+    assert "discovery" not in r  # no legal caution until she signals she wants to save
+
+
+def test_g21_never_overrides_tier_3_crisis() -> None:
+    # An evidence question that ALSO contains imminent-harm language must still
+    # return the Tier-3 crisis response, not the tier-0 evidence-hygiene steer.
+    result = process_message(
+        "should I record him? he has a gun and is going to kill me",
+        SessionState(),
+    )
+    assert result["tier"] == 3
+    assert "1-800-799-7233" in result["response"]

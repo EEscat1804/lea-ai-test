@@ -410,6 +410,41 @@ G20_TRIGGERS: list[str] = [
     r"(shared|his|her) (device|computer|phone)",
 ]
 
+# G-21: Evidence hygiene — discovery-aware guidance
+#
+# The user asking to RECORD someone, or to write/log EVERYTHING, is the moment
+# Lea can steer toward low-risk evidence before a harmful record exists. These
+# are user *questions* (low false-positive), so a tier-0 steer is safe. The
+# structural protection (not compiling a discoverable archive) is lea-be-core's;
+# this is only the conversational guidance layer — Lea cannot block a write here.
+G21_RECORDING_TRIGGERS: list[str] = [
+    r"(secretly|covertly|quietly) record",
+    r"(can|should|may) i record",
+    r"record (him|her|them|his|the (call|conversation))",
+    r"tape (him|her|them|the (call|conversation))",
+    r"get (it|him|her|them) on (tape|video|audio|camera|recording)",
+]
+
+# Ambiguous "should I write this down?" — could mean "I need to get this out" OR
+# "I want evidence." DON'T assume: the discovery risk is in the *stored record*,
+# not in talking, so Lea leads with listening and ASKS which they want before any
+# legal caution. Singular this/it/that, no "everything" and no destination.
+G21_DOCUMENT_ASK_TRIGGERS: list[str] = [
+    r"(should|do|can|could) i (write|journal|log|jot|note|document) (all )?(this|it|that)( down| out)?",
+]
+
+# Explicit intent to COMPILE or COMMIT to a record — "everything", a destination
+# (journal/vault/case/file), or "for court/evidence." Here the discovery caution
+# is the right response: a permanent, detailed archive is the actual liability.
+G21_RECORD_INTENT_TRIGGERS: list[str] = [
+    r"(write|log|journal|record|document) (down )?everything",
+    r"write everything down",
+    r"keep a (diary|journal|log|record) (of|about|on)",
+    r"save (this|it|that|these).{0,20}(journal|vault|note|record|case|file)",
+    r"add (this|it|that|these).{0,20}(journal|vault|case|file|record)",
+    r"(for|as) (my )?(case|court|evidence|the judge|a record|proof)",
+]
+
 
 # ---------------------------------------------------------------------------
 # RESPONSE TEMPLATES
@@ -529,6 +564,36 @@ RESP: dict[str, str] = {
     "G_third_party_block": (
         "Conversations in this system are private and encrypted. "
         "Session content is not accessible to outside parties."
+    ),
+    "G21_recording": (
+        "Be careful here. In some states it is illegal to record someone — even "
+        "the person hurting you — without their consent, and an illegal recording "
+        "can end up hurting your case instead of helping it. I can't help you "
+        "secretly record him. What is safe to keep, and often stronger, are the "
+        "messages, texts, and voicemails he sends you in his own words. "
+        "Want help saving those, or thinking through what's legal where you live?"
+    ),
+    "G21_document": (
+        "Writing things down can really help — and how you do it matters. Short, "
+        "factual notes are both the strongest and the safest: the date, the time, "
+        "and what happened, in a sentence or two. One honest thing to know: what's "
+        "stored in an app like this can later be requested by the other side's "
+        "lawyers — that's called discovery — and it isn't legally protected the "
+        "way talking to your own lawyer or a shelter advocate is. So go gentle on "
+        "long, emotional retellings kept in a permanent log, and never feel you "
+        "have to write down anything that could be turned against you — you have "
+        "the right to stay silent. Want me to help you turn what happened into a "
+        "short, factual entry?"
+    ),
+    # Ambiguous documentation intent — lead with listening, never assume she's
+    # building evidence. Offer the factual-record path as a *choice*, and ask;
+    # the discovery caution (G21_document) only comes once she signals she wants
+    # to save. This keeps the release valve open for someone who needs to vent.
+    "G21_document_ask": (
+        "I'm here for all of it — if you just need to get this out, go ahead, "
+        "I'm listening. And whenever you want, I can also help you keep a short, "
+        "factual version for your records, kept separate from this. "
+        "Which would help more right now?"
     ),
     "G_name_invite": (
         "I can help you put a name to what's happening — it often makes it easier to trust "
