@@ -36,12 +36,16 @@ from guardrails.rules import (
     G21_DOCUMENT_ASK_TRIGGERS,
     G21_RECORD_INTENT_TRIGGERS,
     G21_RECORDING_TRIGGERS,
+    IDENTITY_INTRO_PATTERNS,
     IMPLICIT_CRISIS_TRIGGERS,
     NAME_REQUEST_TRIGGERS,
     NO_DIAGNOSIS_LABELS,
+    NON_NAME_WORDS,
+    OUTPUT_OVERREACH_TRIGGERS,
     RELATIONAL_ABUSE_PATTERNS,
     RESP,
     RISK_FACTOR_TRIGGERS,
+    SUBPOENA_TRIGGERS,
     TACTIC_PATTERNS,
 )
 from guardrails.session import SessionState
@@ -92,8 +96,18 @@ def build_response(
     session: SessionState,
     tier: int = 0,
     prompt: str = "",  # Capture the incoming prompt
+    override: bool | None = None,
 ) -> dict[str, Any]:
-    """Central response builder. Returns a dict that's the lea-ai HTTP contract."""
+    """Central response builder. Returns a dict that's the lea-ai HTTP contract.
+
+    `is_override` tells lea-be-core whether THIS deterministic verdict must
+    replace the conversational model's (Gemini's) reply, rather than just
+    inform it. Severity (`tier`) and override-authority are different axes:
+    every Tier-2/3 safety verdict overrides, AND specific Tier-0 bright-line
+    refusals (hard blocks, outcome-prediction, third-party) override too — pass
+    `override=True` for those. Soft Tier-0 copy (validation, naming, evidence
+    guidance, default) leaves the reply to the model (`is_override=False`).
+    """
     if session.expert_mode:
         text = pair_clinical_terms(text)
 
@@ -102,9 +116,12 @@ def build_response(
     # separate prose-cleanup pass is needed here.
     text = PERSONA_MANAGER.apply_mode_constraints(text, session, prompt)
 
+    is_override = override if override is not None else (tier >= 2)
+
     return {
         "response": text,
         "tier": tier,
+        "is_override": is_override,
         "show_quick_exit": True,
         "vault_write_requires_consent": not session.data_storage_consent,
         "session": session,
@@ -151,6 +168,46 @@ def matches_any(prompt: str, patterns: list[str]) -> bool:
 def contains_quoted_speech(prompt: str) -> bool:
     """G-08: detect verbatim disclosures — quoted speech in prompt."""
     return bool(re.search(r'["“”‘’].{3,100}["“”‘’]', prompt))
+
+
+def screen_output(text: str) -> dict[str, Any]:
+    """Output-direction screen: flag legal-advice / UPL overreach in a MODEL reply.
+
+    Unlike `process_message` (which screens user INPUT), this runs on text the
+    conversational model already generated. On a hit it returns the disclaimer
+    for lea-be-core to append to the reply — the educational content still goes
+    out, but the EULA's "information, not advice" boundary is enforced. Default-
+    safe and deterministic: no match => not flagged, no disclaimer.
+    """
+    if matches_any(text.lower(), OUTPUT_OVERREACH_TRIGGERS):
+        return {
+            "flagged": True,
+            "categories": ["legal_overreach"],
+            "disclaimer": RESP["output_legal_disclaimer"],
+        }
+    return {"flagged": False, "categories": [], "disclaimer": None}
+
+
+def extract_self_identifications(prompt: str) -> list[str]:
+    """Identity guardrail: return the DISTINCT self-introduced names in a message.
+
+    Runs on the original-cased prompt (capitalization is the signal). Filters
+    common emotion/state words so "I'm scared" isn't read as the name "Scared".
+    Dedup is case-insensitive, so restating the same name once doesn't count as
+    a conflict. Two or more distinct names => the user contradicted themselves in
+    a single turn.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for pattern in IDENTITY_INTRO_PATTERNS:
+        for match in re.finditer(pattern, prompt):
+            candidate = match.group(1)
+            key = candidate.lower()
+            if key in NON_NAME_WORDS or key in seen:
+                continue
+            seen.add(key)
+            names.append(candidate)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +383,9 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             r"(good|strong|decent) chance",
         ],
     ):
-        return build_response(RESP["G_predict_block"], session, tier=0, prompt=user_prompt)
+        return build_response(
+            RESP["G_predict_block"], session, tier=0, prompt=user_prompt, override=True
+        )
 
     if matches_any(
         pl,
@@ -338,7 +397,36 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
             r"(show|tell) me what (she|he).{0,20}(said|asked|shared|been saying)",
         ],
     ):
-        return build_response(RESP["G_third_party_block"], session, tier=0, prompt=user_prompt)
+        return build_response(
+            RESP["G_third_party_block"], session, tier=0, prompt=user_prompt, override=True
+        )
+
+    # -----------------------------------------------------------------------
+    # IDENTITY-CONTRADICTION GUARDRAIL (report finding #3)
+    #
+    # If a single message asserts two or more DISTINCT self-identifications, ask
+    # which name to use instead of silently accepting one. Runs on `p` (original
+    # casing) since capitalization is the name signal. Sits AFTER Tier-3 crisis
+    # and the bright-line refusals so it can never pre-empt safety routing.
+    # Override=True so the conversational model can't blindly accept the name.
+    # -----------------------------------------------------------------------
+    if len(extract_self_identifications(p)) >= 2:
+        return build_response(
+            RESP["G_identity_clarify"], session, tier=0, prompt=user_prompt, override=True
+        )
+
+    # -----------------------------------------------------------------------
+    # SUBPOENA / DISCOVERY HONESTY (report §III)
+    #
+    # Answer legal-compulsion questions honestly instead of over-promising
+    # privacy. Runs before G-21 so "what protects my logs from discovery" gets
+    # the legal-accuracy answer, not the generic evidence-hygiene steer.
+    # Override=True so a falsely-reassuring model reply can't slip through.
+    # -----------------------------------------------------------------------
+    if matches_any(pl, SUBPOENA_TRIGGERS):
+        return build_response(
+            RESP["G_subpoena_discovery"], session, tier=0, prompt=user_prompt, override=True
+        )
 
     # -----------------------------------------------------------------------
     # G-21 evidence hygiene — discovery-aware guidance (Tier 0)
@@ -396,13 +484,13 @@ def process_message(user_prompt: str, session: SessionState) -> dict[str, Any]:
     # G-16 / G-17 / G-18 — hard blocks
     # -----------------------------------------------------------------------
     if matches_any(pl, G16_TRIGGERS):
-        return build_response(RESP["G16_block"], session, tier=0, prompt=user_prompt)
+        return build_response(RESP["G16_block"], session, tier=0, prompt=user_prompt, override=True)
 
     if matches_any(pl, G17_TRIGGERS):
-        return build_response(RESP["G17_block"], session, tier=0, prompt=user_prompt)
+        return build_response(RESP["G17_block"], session, tier=0, prompt=user_prompt, override=True)
 
     if matches_any(pl, G18_TRIGGERS):
-        return build_response(RESP["G18_block"], session, tier=0, prompt=user_prompt)
+        return build_response(RESP["G18_block"], session, tier=0, prompt=user_prompt, override=True)
 
     # -----------------------------------------------------------------------
     # G-05 user self-doubt → validate; append G-10 reframe if both fire
