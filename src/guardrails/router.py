@@ -41,6 +41,7 @@ from guardrails.rules import (
     NAME_REQUEST_TRIGGERS,
     NO_DIAGNOSIS_LABELS,
     NON_NAME_WORDS,
+    OUTPUT_OVERREACH_TRIGGERS,
     RELATIONAL_ABUSE_PATTERNS,
     RESP,
     RISK_FACTOR_TRIGGERS,
@@ -167,6 +168,24 @@ def matches_any(prompt: str, patterns: list[str]) -> bool:
 def contains_quoted_speech(prompt: str) -> bool:
     """G-08: detect verbatim disclosures — quoted speech in prompt."""
     return bool(re.search(r'["“”‘’].{3,100}["“”‘’]', prompt))
+
+
+def screen_output(text: str) -> dict[str, Any]:
+    """Output-direction screen: flag legal-advice / UPL overreach in a MODEL reply.
+
+    Unlike `process_message` (which screens user INPUT), this runs on text the
+    conversational model already generated. On a hit it returns the disclaimer
+    for lea-be-core to append to the reply — the educational content still goes
+    out, but the EULA's "information, not advice" boundary is enforced. Default-
+    safe and deterministic: no match => not flagged, no disclaimer.
+    """
+    if matches_any(text.lower(), OUTPUT_OVERREACH_TRIGGERS):
+        return {
+            "flagged": True,
+            "categories": ["legal_overreach"],
+            "disclaimer": RESP["output_legal_disclaimer"],
+        }
+    return {"flagged": False, "categories": [], "disclaimer": None}
 
 
 def extract_self_identifications(prompt: str) -> list[str]:

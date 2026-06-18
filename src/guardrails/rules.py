@@ -238,6 +238,22 @@ IDENTITY_INTRO_PATTERNS: list[str] = [
     r"(?i:this is)\s+([A-Z][a-zA-Z'’-]+)",
 ]
 
+# Output-direction screening (UPL / legal-advice overreach). These match the
+# MODEL'S generated reply, not user input, so they target the SHAPES of
+# overreach: outcome guarantees, deadline directives, "you don't need a lawyer".
+# Conservative by design — a miss just means no disclaimer is appended; the
+# educational content still goes out.
+OUTPUT_OVERREACH_TRIGGERS: list[str] = [
+    r"\byou (will|are going to|.ll) (win|lose|get|keep|receive)\b",
+    r"\bthe judge will (grant|deny|give|rule|order|approve)\b",
+    r"\bi (guarantee|promise|assure you)\b",
+    r"\b(you|we)('| a)?re guaranteed\b",
+    r"\byour case is (a |an )?(strong|weak|slam dunk|solid|winnable|sure thing)",
+    r"\byou (should|must|need to) file\b.{0,40}\bby\b",
+    r"\byou (will|are) (definitely|certainly|surely) (win|qualify|get|keep)\b",
+    r"\byou (don.t|do not) need (a |an )?(lawyer|attorney)\b",
+]
+
 # Subpoena / discovery honesty (report §III). Narrowly scoped to clearly-legal
 # compulsion language so it never collides with G-20 device-monitoring ("is my
 # data safe" stays with G-20). Crisis is checked earlier and always wins.
@@ -610,6 +626,12 @@ RESP: dict[str, str] = {
         "Before I note anything down, I want to make sure I have it right — I'm seeing "
         "more than one name in that message. Which name would you like me to use for you? "
         "I'll use only the one you choose, and you can change it whenever you like."
+    ),
+    "output_legal_disclaimer": (
+        "One important note: I can share legal information, not legal advice — I'm not a "
+        "lawyer, I can't predict what a court will do, and I can't guarantee any outcome. "
+        "For your specific situation and any filing deadlines, please confirm with a licensed "
+        "attorney or a domestic-violence legal advocate."
     ),
     "G_subpoena_discovery": (
         "That's an important question, and you deserve a straight answer. What you share here "

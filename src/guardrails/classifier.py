@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, fields
 from typing import Any
 
-from guardrails.router import process_message
+from guardrails.router import process_message, screen_output
 from guardrails.session import SessionState
 from lib.responses import json_response, problem_response
 
@@ -43,6 +43,21 @@ async def classify_message(body: dict[str, Any], env: Any) -> Any:
     if direction not in ("input", "output"):
         return problem_response(400, "bad_request", "direction must be input|output")
 
+    # Output direction screens the MODEL'S reply for legal-advice/UPL overreach
+    # and returns a disclaimer to append — it does NOT run the input cascade.
+    if direction == "output":
+        screen = screen_output(text)
+        return json_response(
+            {
+                "classification": "guidance" if screen["flagged"] else "safe",
+                "tier": 0,
+                "direction": direction,
+                "categories": screen["categories"],
+                "show_quick_exit": True,
+                "disclaimer": screen["disclaimer"],
+            }
+        )
+
     session = _build_session(body.get("session"))
     result = process_message(text, session)
 
@@ -57,6 +72,7 @@ async def classify_message(body: dict[str, Any], env: Any) -> Any:
             "direction": direction,
             "categories": session.risk_factors,
             "show_quick_exit": result["show_quick_exit"],
+            "disclaimer": None,
         }
     )
 

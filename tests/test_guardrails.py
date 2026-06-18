@@ -14,6 +14,7 @@ from guardrails.router import (
     detect_tactics,
     enforce_trusted_friend_mode,
     process_message,
+    screen_output,
     validate_then_educate,
 )
 from guardrails.session import SessionState
@@ -622,3 +623,44 @@ def test_subpoena_never_overrides_tier_3_crisis() -> None:
     )
     assert result["tier"] == 3
     assert "1-800-799-7233" in result["response"]
+
+
+# ---------------------------------------------------------------------------
+# Output-direction screening — screens the MODEL'S reply (not user input) for
+# legal-advice / UPL overreach. The EULA disclaims advice and an attorney-client
+# relationship; if the model overreaches (guarantees an outcome, dictates a
+# filing deadline, says "you don't need a lawyer"), lea-be-core appends the
+# returned disclaimer. Deterministic + conservative: default-safe on no match.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Don't worry, you will win custody for sure.",
+        "The judge will grant your restraining order.",
+        "I guarantee this will work in court.",
+        "Honestly, your case is a slam dunk.",
+        "You should file the DV-100 by Friday to be safe.",
+        "You don't need a lawyer for this.",
+    ],
+)
+def test_output_screen_flags_legal_overreach(reply: str) -> None:
+    out = screen_output(reply)
+    assert out["flagged"] is True
+    assert "legal_overreach" in out["categories"]
+    assert out["disclaimer"]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "That sounds really hard. I'm here with you.",
+        "A restraining order is a court order that can require someone to stay away.",
+        "Would you like help documenting what happened, in your own words?",
+    ],
+)
+def test_output_screen_passes_safe_replies(reply: str) -> None:
+    out = screen_output(reply)
+    assert out["flagged"] is False
+    assert out["disclaimer"] is None
