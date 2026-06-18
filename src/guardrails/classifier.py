@@ -74,6 +74,7 @@ async def process_message_endpoint(body: dict[str, Any], env: Any) -> Any:
         {
             "response": result["response"],
             "tier": result["tier"],
+            "is_override": result["is_override"],
             "show_quick_exit": result["show_quick_exit"],
             "vault_write_requires_consent": result["vault_write_requires_consent"],
             "session": _serialize_session(result["session"]),

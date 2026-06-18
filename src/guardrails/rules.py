@@ -223,6 +223,47 @@ NAME_REQUEST_TRIGGERS: list[str] = [
     r"\bname (it|this|the|what)",
 ]
 
+# Identity-contradiction guardrail (report finding #3). Patterns that introduce
+# the SPEAKER'S OWN name. The prefix matches case-insensitively but the captured
+# name must start with a capital (the `(?i:...)` scopes the flag to the prefix
+# only) — that's what distinguishes "I am Aaron" from "I am scared", and keeps
+# this conservative: lowercase pseudonyms are missed rather than false-firing on
+# emotion words. Detection is stateless (single message) by design — lea-ai does
+# not persist the user's name; cross-turn identity is lea-be-core's to own.
+IDENTITY_INTRO_PATTERNS: list[str] = [
+    r"(?i:my name is)\s+([A-Z][a-zA-Z'’-]+)",
+    r"(?i:call me)\s+([A-Z][a-zA-Z'’-]+)",
+    r"(?i:i am)\s+([A-Z][a-zA-Z'’-]+)",
+    r"(?i:i'm)\s+([A-Z][a-zA-Z'’-]+)",
+    r"(?i:this is)\s+([A-Z][a-zA-Z'’-]+)",
+]
+
+# Subpoena / discovery honesty (report §III). Narrowly scoped to clearly-legal
+# compulsion language so it never collides with G-20 device-monitoring ("is my
+# data safe" stays with G-20). Crisis is checked earlier and always wins.
+SUBPOENA_TRIGGERS: list[str] = [
+    r"\bsubpoena",
+    r"court order",
+    r"\bwarrant\b",
+    r"\bdiscovery\b",
+    r"(used|held|turned) against me in court",
+    r"(his|her|the|opposing) (lawyer|attorney|counsel).{0,40}(get|access|see|read|obtain|use|request)",
+    r"(can|could|will|would) (the )?(police|a judge|the court|a court)"
+    r".{0,30}(get|access|see|obtain|request|read).{0,20}(my|the|these|this)",
+]
+
+# Capitalized words that commonly follow "I am/I'm" at a sentence start but are
+# NOT names — filtered out so they can't be mistaken for a self-identification.
+NON_NAME_WORDS: frozenset[str] = frozenset(
+    {
+        "sorry", "scared", "tired", "fine", "okay", "ok", "here", "done", "sure",
+        "afraid", "worried", "confused", "lost", "ready", "exhausted", "struggling",
+        "trying", "good", "bad", "alone", "safe", "unsafe", "terrified", "numb",
+        "angry", "sad", "happy", "nervous", "anxious", "not", "so", "just", "still",
+        "feeling", "in", "at", "the", "a", "an", "going", "about",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # G-01..G-20 trigger lists
@@ -564,6 +605,21 @@ RESP: dict[str, str] = {
     "G_third_party_block": (
         "Conversations in this system are private and encrypted. "
         "Session content is not accessible to outside parties."
+    ),
+    "G_identity_clarify": (
+        "Before I note anything down, I want to make sure I have it right — I'm seeing "
+        "more than one name in that message. Which name would you like me to use for you? "
+        "I'll use only the one you choose, and you can change it whenever you like."
+    ),
+    "G_subpoena_discovery": (
+        "That's an important question, and you deserve a straight answer. What you share here "
+        "is encrypted and isn't visible to the person hurting you or to other users. But I want "
+        "to be honest about the limits: like almost any app or online service, records can be "
+        "compelled by a valid subpoena, court order, or warrant — and chat logs are not legally "
+        "protected (privileged) the way a conversation with your own attorney or a "
+        "domestic-violence advocate is. If something needs to stay privileged, the safest place "
+        "for it is with a lawyer or an advocate. I can also help you keep what's stored here "
+        "short and factual, so there's less that could ever be requested. Want to talk that through?"
     ),
     "G21_recording": (
         "Be careful here. In some states it is illegal to record someone — even "
