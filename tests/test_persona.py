@@ -232,3 +232,73 @@ def test_gentle_mode_caps_to_a_single_question() -> None:
     # words are softened, not dropped
     assert "feel safe" in out
     assert "want help" in out
+
+
+# ---------------------------------------------------------------------------
+# Feature-Awareness & Self-Knowledge Standard v1.0 — additive coverage
+#
+# The standard broadened the manifest (app map, voice, journals, learn, connect,
+# settings) and added the "how do I…?" delivery rules + an element glossary. Two
+# product decisions are locked here AGAINST the source document, which we
+# deliberately did NOT follow (re-confirm with the owner before flipping either):
+#   - disguise cover persona names stay OUT of the model-visible prompt — the
+#     security leak-guard wins over the document's instruction to recite them;
+#   - the Quick Exit / Disguise interaction model in the manifest is unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_self_knowledge_features_are_in_the_manifest() -> None:
+    # The broader app map from the standard must be present so Lea can answer the
+    # §9 "how do I…?" questions from ground truth, not invention.
+    expected = {
+        "bottom_navigation",
+        "voice_input",
+        "voice_call",
+        "mood_checkin",
+        "learn_modules",
+        "journal_tab",
+        "vault",
+        "safety_plan",
+        "language_setting",
+        "subscription",
+        "data_privacy_indicator",
+    }
+    assert expected <= set(FEATURE_MANIFEST["features"])
+
+
+def test_persona_carries_feature_awareness_rules() -> None:
+    # The §1/§11/§12 delivery rules must reach the model, not just the manifest.
+    flat = re.sub(r"\s+", " ", DEFAULT_PERSONA).lower()
+    assert "name the exact control" in flat
+    assert "do not claim it exists" in flat  # never invent UI
+    assert "never invent ui" in flat
+    assert "companion lane" in flat  # educate, don't give legal advice
+
+
+def test_persona_element_glossary_names_plus_not_paperclip() -> None:
+    # The naming source of truth must reach the model; the canonical known-wording
+    # correction ("+ button", not a paperclip) is the headline example.
+    flat = re.sub(r"\s+", " ", DEFAULT_PERSONA).lower()
+    assert "never substitute a guessed label" in flat
+    assert "not a paperclip" in flat
+
+
+def test_disguise_cover_persona_names_never_reach_the_prompt() -> None:
+    # Locks the product decision (2026-06): the standard names the four covers and
+    # tells Lea to recite them, but disguise only protects if an abuser-as-user
+    # can't learn what the app looks like hidden. The real cover names must stay
+    # OUT of the model-visible prompt — same leak-guard intent as the generic-name
+    # test above, but pinned to the actual names from the standard.
+    persona = DEFAULT_PERSONA.lower()
+    for cover in ("mise en place", "fitflow", "stillwater", "spendwise"):
+        assert cover not in persona, f"disguise cover leaked into persona: {cover!r}"
+
+
+def test_quick_exit_model_is_unchanged_by_the_standard() -> None:
+    # The standard describes a one-tap Quick Exit + separate eye-toggle Disguise;
+    # we deliberately kept the existing expand-into-mascot-and-eye model. Assert
+    # the manifest still carries the expansion flow so a future "sync to the doc"
+    # edit can't silently flip a safety-critical interaction without updating this.
+    qe = FEATURE_MANIFEST["features"]["quick_exit"]
+    assert "expands" in qe["ui_location"].lower()  # badge expands into icons
+    assert "mascot" in qe["how_to_access"].lower()  # leave via the mascot, not one tap
