@@ -257,7 +257,7 @@ FEATURE_MANIFEST: FeatureManifest = {
             ),
             "ui_location": (
                 "The 'How are you feeling today?' card near the top of the Home "
-                "tab, with six taps: Great, Good, Okay, Not great, Bad, Overwhelmed."
+                "tab, with several mood options to tap."
             ),
             "how_to_access": (
                 "Open the Home tab and tap the mood that fits on the 'How are you "
@@ -337,7 +337,7 @@ FEATURE_MANIFEST: FeatureManifest = {
             ),
             "ui_location": (
                 "Settings (reached from the profile) → 'Language', offering "
-                "English, Indonesian, German, French, Spanish, and Hindi."
+                "several languages including English and others."
             ),
             "how_to_access": (
                 "Open Settings from your profile, tap 'Language', and choose your language."
@@ -412,8 +412,11 @@ def _render_feature_manifest(manifest: FeatureManifest) -> str:
 # ---------------------------------------------------------------------------
 _ELEMENT_GLOSSARY = """\
 Naming controls correctly (use these names; never substitute a guessed label):
-- The "+" (plus) button in the chat input bar: add or attach a photo or file, or \
-add a new Scrapbook entry. It is a plus, not a paperclip.
+- The "+" (plus) button in the chat input bar: attach a photo, document, or \
+voice note to the chat. It is a plus, not a paperclip.
+- The "+" (plus) button below the Scrapbook book in the Journal tab: add a new \
+Scrapbook entry. This is a different button, in a different location, from the \
+chat input bar "+" above.
 - Microphone icon: voice input — dictate a message instead of typing.
 - Phone/handset icon: start a hands-free voice call with Lea (premium).
 - Arrow button: send the typed message.
