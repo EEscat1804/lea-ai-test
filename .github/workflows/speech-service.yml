@@ -1,0 +1,71 @@
+name: Speech Service CI
+
+# Scoped to services/speech only — it's a separate deployable (own Dockerfile,
+# own requirements.txt with heavy native deps like torch/funasr), not part of
+# the Cloudflare Worker build the main CI workflow checks. See
+# services/speech/README.md for why this can't just run in ci.yml.
+
+on:
+  pull_request:
+    branches: [main, release/staging]
+    paths:
+      - "services/speech/**"
+  push:
+    branches: [main, release/staging]
+    paths:
+      - "services/speech/**"
+
+permissions:
+  contents: read
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/speech/requirements-dev.txt
+
+      - name: Install deps
+        run: pip install -r services/speech/requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check services/speech
+
+      - name: Mypy
+        run: mypy services/speech --config-file pyproject.toml
+
+      - name: Pytest (excludes real-model integration tests — no network in CI)
+        run: pytest services/speech/tests/ -m "not integration"
+
+  docker-build-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t lea-speech-ci services/speech
+
+      - name: Run container
+        run: |
+          docker run -d --name lea-speech-ci \
+            -e SPEECH_SERVICE_TOKEN=ci-smoke-token \
+            -p 50000:50000 lea-speech-ci
+
+      - name: Wait for /health (cold-start model download can take a few minutes)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:50000/health; then exit 0; fi
+            sleep 10
+          done
+          echo "service never became healthy within 10 minutes"
+          exit 1
+
+      - name: Container logs
+        if: always()
+        run: docker logs lea-speech-ci

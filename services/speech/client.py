@@ -1,10 +1,13 @@
 """
-Lightweight HTTP client for the speech intake service, for use by the main
-Lea AI app (which shouldn't need torch/funasr as a direct dependency just to
-send an audio file to this service).
+Lightweight HTTP client for the speech intake service, for use by callers
+that shouldn't need torch/funasr as a direct dependency just to send an
+audio file to this service.
 """
 
+from __future__ import annotations
+
 import os
+from typing import Any
 
 import requests
 
@@ -13,8 +16,8 @@ def transcribe(
     audio_path: str,
     service_url: str = "http://localhost:50000",
     language: str = "auto",
-    token: str = None,
-) -> dict:
+    token: str | None = None,
+) -> dict[str, Any]:
     """POST an audio file to the speech service and return its parsed JSON response.
 
     token defaults to the SPEECH_SERVICE_TOKEN env var (same variable the
@@ -32,4 +35,5 @@ def transcribe(
             timeout=60,
         )
     response.raise_for_status()
-    return response.json()
+    result: dict[str, Any] = response.json()
+    return result

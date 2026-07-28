@@ -82,6 +82,22 @@ This is a shared-secret bearer token, not a full auth system (no per-caller
 identity, no expiry, no rotation) — fine for a service reached only by
 trusted internal callers, not for anything beyond that.
 
+## Limits
+
+- **Upload size**: `MAX_UPLOAD_BYTES` (default 25MB) — enforced on raw bytes
+  before decoding, `413` if exceeded.
+- **Audio duration**: `MAX_AUDIO_SECONDS` (default 600 = 10min) — enforced
+  *after* decoding, `413` if exceeded. A compressed file well under the byte
+  cap can still decode into much more raw audio than its size implies, so
+  the byte cap alone doesn't bound inference cost.
+- **Concurrent inference**: `MAX_CONCURRENT_TRANSCRIPTIONS` (default 2) — a
+  semaphore around the actual `model.generate()` call, since all requests
+  share one model instance. Excess requests wait up to
+  `INFERENCE_QUEUE_TIMEOUT_SECONDS` (default 30s), then get `503`.
+
+All four are explicit placeholders, not considered decisions — revisit once
+real traffic/duration data exists.
+
 ## Run locally
 
 ```bash
@@ -100,10 +116,14 @@ docker run -e SPEECH_SERVICE_TOKEN=... -e SENSEVOICE_DEVICE=cuda:0 --gpus all -p
 
 Cold start downloads ~1GB of model weights into the container on first run
 and can take several minutes (confirmed via a real `docker build` + `docker
-run` smoke test) — mount a persistent volume at `/root/.cache/modelscope`
+run` smoke test) — mount a persistent volume at `/home/appuser/.cache/modelscope`
 in any real deployment, or the model re-downloads on every container
 restart. A readiness/liveness probe against `/health` should allow a
-generous startup grace period for this reason.
+generous startup grace period for this reason; the image's own `HEALTHCHECK`
+uses a 5-minute `--start-period` to account for this.
+
+Runs as a non-root user (`appuser`, uid 1000) with dependencies pinned to
+exact versions actually tested against (not open ranges) for reproducibility.
 
 No hosting decision has been made — this needs a real container host
 (Cloud Run, Fly.io, ECS, etc.), which is itself a decision this proposal
@@ -111,7 +131,7 @@ doesn't make.
 
 ## API
 
-`POST /v1/transcribe` — multipart form, field `file` (wav/mp3, any length). Requires auth, see above.
+`POST /v1/transcribe` — multipart form, field `file` (wav/mp3, up to `MAX_AUDIO_SECONDS`). Requires auth, see above.
 
 ```bash
 curl -H "Authorization: Bearer $SPEECH_SERVICE_TOKEN" -F "file=@call.wav" http://localhost:50000/v1/transcribe
@@ -139,18 +159,46 @@ dependency for WAV/FLAC/OGG input.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/
+pytest tests/                        # everything, including real-model tests
+pytest tests/ -m "not integration"   # fast, no network/model needed (this is what CI runs)
 ```
 
-Minimal pytest suite (`tests/test_service.py`), scoped to this service only —
-uses FastAPI's `TestClient`, no separate server process needed. Covers auth
-(missing/wrong token), validation (wrong file type, undecodable audio,
-oversized file), and real wav/mp3 transcription — including a synthesized
-trigger-phrase clip (`tests/fixtures/trigger_weapon.wav`, see
-`tests/fixtures/README.md` for how it was generated) verified to transcribe
-correctly. It does **not** assert anything about `src/guardrails/` — this
-service doesn't call into it; that integration is an open question for the
+The model loads lazily (`app.get_model`, on first use, not at import) and is
+injectable via `app.dependency_overrides` — importing `app.py` or exercising
+any request path that never reaches inference (auth/validation rejections)
+needs no network access. Tests that do need the real model are marked
+`@pytest.mark.integration` (registered in this directory's own `pytest.ini`,
+not the repo root's).
+
+9 tests in `tests/test_service.py`:
+- auth (missing/wrong token), validation (wrong file type, undecodable
+  audio, oversized file) — fast, no model needed
+- a fake-model injection test asserting `clean_text` correctly strips the
+  emoji `rich_transcription_postprocess` embeds for a recognized emotion —
+  regression test for a real bug (see below), deterministic, no network
+- `@pytest.mark.integration`: real wav + real mp3 transcription against the
+  actual model, including a synthesized trigger-phrase clip
+  (`tests/fixtures/trigger_weapon.wav`, see `tests/fixtures/README.md`)
+
+None of this asserts anything about `src/guardrails/` — this service
+doesn't call into it; that integration is an open question for the
 guardrails owners, not something this PR decides.
+
+`ruff check services/speech` and `mypy services/speech --config-file
+pyproject.toml` (run from repo root) both pass clean against this repo's
+existing strict config — nothing relaxed or excluded.
+
+**Fixed bug**: `clean_text` used to be derived independently from the raw
+tagged text (via its own regex), separately from the `text` field (derived
+from `rich_transcription_postprocess`). Those two derivations could drift —
+concretely, `rich_transcription_postprocess` embeds an emoji for recognized
+emotions (e.g. 😊 for `HAPPY`) that the independent `clean_text` regex never
+accounted for stripping, since it only ever saw the raw pre-postprocess
+text. No real-audio fixture exercised this before (`trigger_weapon.wav`
+reports `EMO_UNKNOWN`, which maps to no emoji), so it went unnoticed. Fixed
+by deriving `clean_text` by stripping known decorative symbols from the
+*rich* text instead — single source of truth, can't drift. Covered by
+`test_transcribe_clean_text_strips_emoji_from_fake_model`.
 
 ## Open questions for the team (not resolved by this PR)
 
