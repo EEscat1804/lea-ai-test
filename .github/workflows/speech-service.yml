@@ -10,10 +10,12 @@ on:
     branches: [main, release/staging]
     paths:
       - "services/speech/**"
+      - ".github/workflows/speech-service.yml"
   push:
     branches: [main, release/staging]
     paths:
       - "services/speech/**"
+      - ".github/workflows/speech-service.yml"
 
 permissions:
   contents: read
@@ -65,6 +67,23 @@ jobs:
           done
           echo "service never became healthy within 10 minutes"
           exit 1
+
+      # /health only proves the container booted — it doesn't load the model,
+      # so a broken model name/config could still pass it. Send a real
+      # authenticated request to prove the model actually loads and runs.
+      - name: Real transcription smoke test
+        run: |
+          response=$(curl -sf -H "Authorization: Bearer ci-smoke-token" \
+            -F "file=@services/speech/tests/fixtures/trigger_weapon.wav" \
+            http://localhost:50000/v1/transcribe)
+          echo "$response"
+          echo "$response" | python3 -c "
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body.get('clean_text'), f'empty transcript: {body}'
+          assert 'weapon' in body['clean_text'].lower(), f'unexpected transcript: {body}'
+          print('transcription smoke test passed')
+          "
 
       - name: Container logs
         if: always()

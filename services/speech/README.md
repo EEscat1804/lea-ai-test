@@ -163,12 +163,18 @@ pytest tests/                        # everything, including real-model tests
 pytest tests/ -m "not integration"   # fast, no network/model needed (this is what CI runs)
 ```
 
-The model loads lazily (`app.get_model`, on first use, not at import) and is
-injectable via `app.dependency_overrides` — importing `app.py` or exercising
-any request path that never reaches inference (auth/validation rejections)
-needs no network access. Tests that do need the real model are marked
-`@pytest.mark.integration` (registered in this directory's own `pytest.ini`,
-not the repo root's).
+The model loads lazily inside `_transcribe_sync`, called directly — not as a
+FastAPI route dependency, since `Depends()` parameters resolve before the
+handler body runs, which would construct the model for every request
+(including ones that fail validation) before that validation ever executes.
+It's called only after file-type/size/duration checks pass, and is
+monkeypatchable at module level (`monkeypatch.setattr(app_module,
+"get_model", ...)`) for tests. Importing `app.py`, or exercising any request
+path that never reaches inference (auth/validation rejections), needs no
+network access — verified directly by rigging `get_model()` to raise if
+called at all and confirming the rejection tests still pass. Tests that do
+need the real model are marked `@pytest.mark.integration` (registered in
+this directory's own `pytest.ini`, not the repo root's).
 
 9 tests in `tests/test_service.py`:
 - auth (missing/wrong token), validation (wrong file type, undecodable

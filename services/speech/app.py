@@ -111,10 +111,9 @@ _model_lock = threading.Lock()
 
 
 def get_model() -> AutoModel:
-    """Lazily construct the model on first use (not at import time) — importing
-    this module, or exercising any request path that never reaches inference
-    (auth/validation rejections), should not require network access or the
-    ~1GB model download. Overridable via app.dependency_overrides in tests."""
+    """Lazily construct the model on first use (not at import time, and not
+    at request-dependency-resolution time either — see the call site in
+    _transcribe_sync). Monkeypatchable at module level in tests."""
     global _model
     if _model is None:
         with _model_lock:
@@ -128,15 +127,21 @@ def get_model() -> AutoModel:
     return _model
 
 
-def _transcribe_sync(
-    model: AutoModel, raw_bytes: bytes, language: str, use_itn: bool
-) -> list[dict[str, Any]]:
+def _transcribe_sync(raw_bytes: bytes, language: str, use_itn: bool) -> list[dict[str, Any]]:
     """Blocking work (audio decode + model inference) — run via run_in_threadpool
-    so it doesn't tie up the async event loop for the duration of a request."""
+    so it doesn't tie up the async event loop for the duration of a request.
+
+    get_model() is called here — inside the thread, after decode + duration
+    validation — rather than as a FastAPI route dependency. A Depends()
+    parameter is resolved before the handler body runs, which would
+    construct/load the model for every request (including ones that fail
+    file-type or size validation) before that validation ever executes.
+    """
     audio = load_audio(raw_bytes)
     duration_seconds = audio.shape[-1] / TARGET_FS
     if duration_seconds > MAX_AUDIO_SECONDS:
         raise AudioTooLongError(duration_seconds)
+    model = get_model()
     result: list[dict[str, Any]] = model.generate(
         input=audio,
         cache={},
@@ -177,7 +182,6 @@ async def health() -> dict[str, str]:
 @app.post("/v1/transcribe", dependencies=[Depends(require_auth)])
 async def transcribe(
     file: Annotated[UploadFile, File(description="wav or mp3 audio, any duration")],
-    model: Annotated[AutoModel, Depends(get_model)],
     language: str = "auto",
     use_itn: bool = True,
 ) -> dict[str, Any]:
@@ -204,7 +208,7 @@ async def transcribe(
         raise HTTPException(status_code=503, detail="server busy, try again later") from exc
 
     try:
-        result = await run_in_threadpool(_transcribe_sync, model, raw_bytes, language, use_itn)
+        result = await run_in_threadpool(_transcribe_sync, raw_bytes, language, use_itn)
     except sf.LibsndfileError as exc:
         # bad/corrupt/undecodable audio is the caller's fault, not a server error
         raise HTTPException(status_code=400, detail=f"could not decode audio: {exc}") from exc
