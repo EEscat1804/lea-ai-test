@@ -1,0 +1,36 @@
+# Render Blueprint for services/speech.
+#
+# Deploy: push this file (at the repo root) + services/speech/Dockerfile +
+# services/speech/requirements.txt to GitHub, then in Render:
+#   New -> Blueprint -> select this repo -> Apply
+# Render reads this file, builds the Docker image, and asks you to fill in
+# SPEECH_SERVICE_TOKEN (marked sync: false below, so Render prompts for it
+# rather than needing a value committed to the repo). Everything else is
+# pre-configured — no other setup needed.
+#
+# After the first deploy finishes, Render shows a URL like
+# https://lea-speech-xxxx.onrender.com — that's your SPEECH_SERVICE_URL.
+
+services:
+  - type: web
+    name: lea-speech
+    runtime: docker
+    dockerfilePath: ./services/speech/Dockerfile
+    dockerContext: .
+    plan: standard        # needs real RAM for the model — see note below
+    healthCheckPath: /health
+    envVars:
+      - key: SPEECH_SERVICE_TOKEN
+        sync: false        # you enter this yourself in the Render dashboard
+      - key: SENSEVOICE_DEVICE
+        value: cpu
+      - key: MAX_CONCURRENT_TRANSCRIPTIONS
+        value: "2"
+
+# Plan note: SenseVoiceSmall plus the FunASR/torch runtime needs meaningfully
+# more RAM than Render's free tier (512MB) gives you — expect OOM crashes on
+# free. "standard" (currently 2GB RAM) is a safer starting point for a demo;
+# scale up if the first request after a cold start times out or the process
+# gets killed. The free plan also spins down when idle, so every wake-up
+# re-triggers the model download — another reason a paid plan feels better
+# for anything beyond a one-off test.
