@@ -35,6 +35,28 @@ product decision that needs the team/manager (privacy vs. survives-device-loss).
 | `POST /v1/lea/process` | Full guardrails turn: returns user-facing text + `tier` + updated `session` |
 | `POST /v1/guardrails/classify` | Classification only (no user copy) — for pre-LLM filtering |
 | `GET /v1/persona/prompt?persona=&mode=` | Compose a persona system prompt for Gemini |
+| `POST /v1/memory/context` | Render the "what you already know about this user" block from `{memories, monitored_device}` — restricted (safety-plan) memories never render; empty string when monitored or nothing renders |
+| `POST /v1/memory/extraction-prompt` | `{memories} → {prompt, response_schema}` for lea-be-core's post-session Gemini extraction call |
+| `POST /v1/memory/review` | Deterministic safety gate: `{proposed, memories} → {accepted, rejected}` — nothing may be persisted without passing it |
+
+Memory storage, consent (opt-in, default off), and AES-256-GCM encryption at
+rest live in lea-be-core (`lea_memories` / `lea_memory_settings`,
+`LEA_MEMORY_ENCRYPTION_KEY`, no plaintext fallback). lea-ai stays stateless:
+memories ride the request in both directions, exactly like guardrails
+`session`. All three endpoints are POST — memory payloads must never ride a
+query string into request logs.
+
+User-typed memories (the app's memory screen) are screened through
+`POST /v1/memory/review` too — lea-be-core sends a synthetic add op and
+refuses the save (fail closed) when lea-ai is unreachable, so the
+credential/self-harm/internal-term screens hold on every write path.
+
+**Known gap — `monitored_device`:** lea-ai suppresses all recall when the
+flag is true, and lea-be-core's client passes it through, but no detector in
+lea-be-core's chat path produces the signal yet, so it is always false
+today. Wiring a G-20/monitored-device signal into
+`memoryService.getRecallContext(userId, { monitoredDevice })` is tracked
+follow-up work; until then the suppression is plumbing, not protection.
 
 ---
 
